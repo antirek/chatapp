@@ -59,7 +59,7 @@ router.post('/dialog/:dialogId', async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: result.data,
+      data: result.data,
     });
   } catch (error) {
     res.status(500).json({

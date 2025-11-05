@@ -1,11 +1,24 @@
 <template>
   <div class="flex flex-col h-full">
     <!-- Chat Header -->
-    <div class="p-4 border-b border-gray-200 bg-white">
-      <h2 class="text-lg font-semibold">{{ dialog.dialogName }}</h2>
-      <p v-if="typingUsersText" class="text-sm text-primary-600 animate-pulse">
-        {{ typingUsersText }}
-      </p>
+    <div class="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
+      <div class="flex-1">
+        <h2 class="text-lg font-semibold">{{ dialog.dialogName }}</h2>
+        <p v-if="typingUsersText" class="text-sm text-primary-600 animate-pulse">
+          {{ typingUsersText }}
+        </p>
+      </div>
+      
+      <!-- Info Button -->
+      <button
+        @click="openUserInfo"
+        class="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+        title="Информация о собеседнике"
+      >
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </button>
     </div>
 
     <!-- Messages -->
@@ -75,14 +88,23 @@
 
     <!-- Message Input -->
     <MessageInput @send="handleSendMessage" />
+
+    <!-- User Info Modal -->
+    <UserInfoModal
+      :is-open="isUserInfoOpen"
+      :user="otherUser"
+      @close="closeUserInfo"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
+import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
+import UserInfoModal from './UserInfoModal.vue'
 import type { Dialog, Message } from '@/types'
 
 const props = defineProps<{
@@ -93,10 +115,18 @@ const authStore = useAuthStore()
 const messagesStore = useMessagesStore()
 const messagesContainer = ref<HTMLElement>()
 
+const isUserInfoOpen = ref(false)
+const otherUser = ref<any>(null)
+
 const typingUsersText = computed(() => {
   if (messagesStore.typingUsers.size === 0) return ''
   if (messagesStore.typingUsers.size === 1) return 'печатает...'
   return 'печатают...'
+})
+
+// Load other user info on mount
+onMounted(async () => {
+  await loadOtherUserInfo()
 })
 
 // Scroll to bottom when new messages arrive
@@ -140,5 +170,43 @@ async function handleSendMessage(content: string) {
     console.error('Failed to send message:', error)
   }
 }
+
+// User Info Modal functions
+async function loadOtherUserInfo() {
+  try {
+    // Get dialog members
+    const membersResponse = await api.getDialogMembers(props.dialog.dialogId)
+    
+    if (membersResponse.success && membersResponse.data) {
+      const members = membersResponse.data
+      
+      // Find other user (not current user)
+      const otherMember = members.find((m: any) => m.userId !== authStore.user?.userId)
+      
+      if (otherMember && otherMember.userId) {
+        // Get full user info
+        const userResponse = await api.getUser(otherMember.userId)
+        if (userResponse.success && userResponse.data) {
+          otherUser.value = userResponse.data
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load other user info:', error)
+  }
+}
+
+async function openUserInfo() {
+  // Load fresh user info
+  if (!otherUser.value) {
+    await loadOtherUserInfo()
+  }
+  isUserInfoOpen.value = true
+}
+
+function closeUserInfo() {
+  isUserInfoOpen.value = false
+}
 </script>
+
 

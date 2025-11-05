@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
   - Script for creating test users: `scripts/create-test-users.js`
 
 ### Fixed
+- **CRITICAL: Message Send Response** - Changed field name from `message` to `data`
+  - POST /api/messages/dialog/:id now returns `data` instead of `message`
+  - Consistent with other API responses
+  - Frontend can now display sent messages immediately
 - **Dialog Creation Response** - Now returns full transformed data structure
   - POST /api/dialogs returns same structure as GET /api/dialogs
   - Includes dialogName, unreadCount, and all required fields

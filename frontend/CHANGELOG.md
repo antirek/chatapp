@@ -2,6 +2,33 @@
 
 All notable changes to the frontend will be documented in this file.
 
+## [1.4.0] - 2025-11-05
+
+### Added
+- **User Info Modal** - View contact information of chat participant
+  - "Info" button in chat header
+  - Modal window with user details (name, phone, userId)
+  - Beautiful gradient avatar with initials
+  - Automatic loading of participant data
+  - Backend endpoint: GET /api/dialogs/:id/members
+  - Documentation: `docs/USER_INFO_MODAL_FEATURE.md`
+
+## [1.3.2] - 2025-11-05
+
+### Fixed
+- **CRITICAL: Messages Not Appearing After Send** - Fixed message display issue
+  - Backend now returns `data` instead of `message` field (consistency)
+  - Added optimistic updates - messages appear instantly (~90% faster)
+  - Messages show immediately after send, confirmed by WebSocket
+  - Fixed WebSocket listener bug (was using .off instead of .on for dialog:update)
+  - Documentation: `docs/MESSAGE_SENDING_FIX.md`
+
+### Changed
+- **Optimistic Updates Pattern** - Messages added immediately to UI
+  - No waiting for WebSocket confirmation
+  - Better UX with instant feedback
+  - Deduplication prevents duplicate messages
+
 ## [1.3.1] - 2025-11-05
 
 ### Changed

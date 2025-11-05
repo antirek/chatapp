@@ -132,6 +132,30 @@ router.delete('/:dialogId', async (req, res) => {
 });
 
 /**
+ * GET /api/dialogs/:dialogId/members
+ * Get dialog members
+ */
+router.get('/:dialogId/members', async (req, res) => {
+  try {
+    const { dialogId } = req.params;
+    const dialog = await Chat3Client.getDialog(dialogId);
+    
+    // Get members info
+    const members = dialog.data.members || [];
+    
+    res.json({
+      success: true,
+      data: members,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * POST /api/dialogs/:dialogId/members
  * Add member to dialog
  * Body: { userId: "userId" }

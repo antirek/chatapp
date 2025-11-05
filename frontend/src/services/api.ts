@@ -101,6 +101,11 @@ class ApiService {
     return data
   }
 
+  async getDialogMembers(dialogId: string): Promise<ApiResponse> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/members`)
+    return data
+  }
+
   // ==================== MESSAGES ====================
 
   async getMessages(dialogId: string, params?: {
