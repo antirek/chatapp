@@ -156,17 +156,24 @@ function handleChat3Update(update: any) {
 }
 
 function handleNewMessage(message: any) {
+  // Extract dialogId (can be string or object with _id/id)
+  const messageDialogId = typeof message.dialogId === 'object' 
+    ? (message.dialogId._id || message.dialogId.id) 
+    : message.dialogId
+  
+  const currentDialogId = dialogsStore.currentDialog?.dialogId
+  
   // Add to messages store if in current dialog
-  if (message.dialogId === dialogsStore.currentDialog?.dialogId) {
+  if (messageDialogId === currentDialogId) {
     messagesStore.addMessage(message)
   }
 
   // Update dialog last message
-  dialogsStore.updateLastMessage(message.dialogId, message)
+  dialogsStore.updateLastMessage(messageDialogId, message)
 
   // Increment unread count if not current dialog
-  if (message.dialogId !== dialogsStore.currentDialog?.dialogId) {
-    dialogsStore.incrementUnreadCount(message.dialogId)
+  if (messageDialogId !== currentDialogId) {
+    dialogsStore.incrementUnreadCount(messageDialogId)
   }
 }
 
