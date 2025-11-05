@@ -213,6 +213,7 @@ Backend использует Chat3 API для:
 - 👥 [Test Users](docs/TEST_USERS_AND_DIALOG_UPDATES.md) - тестовые пользователи и оптимизация
 - 💬 [Message Sending Fix](docs/MESSAGE_SENDING_FIX.md) - исправление отображения сообщений
 - ℹ️ [User Info Modal](docs/USER_INFO_MODAL_FEATURE.md) - модальное окно с информацией о собеседнике
+- ⚡ [Real-time Fix](docs/REALTIME_FIX.md) - исправление real-time обновлений сообщений
 - 📋 [Changelog](backend/CHANGELOG.md) - история изменений
 
 ## Скриншоты

@@ -57,6 +57,17 @@ router.post('/dialog/:dialogId', async (req, res) => {
       meta,
     });
 
+    // Emit WebSocket event to all dialog participants
+    const io = req.app.get('io');
+    if (io && io.emitNewMessage) {
+      console.log(`📢 Emitting message:new to dialog:${dialogId}`);
+      console.log(`   Message: ${result.data.content}`);
+      console.log(`   Sender: ${result.data.senderId}`);
+      io.emitNewMessage(dialogId, result.data);
+    } else {
+      console.warn('⚠️  WebSocket io instance not available!');
+    }
+
     res.status(201).json({
       success: true,
       data: result.data,

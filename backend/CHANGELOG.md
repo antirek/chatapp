@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2025-11-05
+
+### Fixed
+- **CRITICAL: Real-time Message Updates** - Fixed WebSocket event emission
+  - Backend now emits `message:new` events to all dialog participants after message creation
+  - Added detailed logging for WebSocket rooms and events
+  - Messages appear instantly for all users in the dialog
+  - Documentation: `docs/REALTIME_FIX.md`
+
 ### Added
 - **Users API** - Endpoints for getting user list
   - GET /api/users - Get all users with search support

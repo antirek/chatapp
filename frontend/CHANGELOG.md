@@ -2,6 +2,15 @@
 
 All notable changes to the frontend will be documented in this file.
 
+## [1.4.1] - 2025-11-05
+
+### Fixed
+- **CRITICAL: Real-time Message Updates** - Fixed message delivery between users
+  - Messages now appear instantly for all users without refresh
+  - Added WebSocket reconnection handling in ChatView
+  - Auto-rejoin dialog room after reconnection  
+  - Proper handling of `connect` event
+
 ## [1.4.0] - 2025-11-05
 
 ### Added

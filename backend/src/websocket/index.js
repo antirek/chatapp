@@ -78,7 +78,8 @@ export async function initializeWebSocket(server) {
     // Handle user joining a dialog room
     socket.on('dialog:join', (dialogId) => {
       socket.join(`dialog:${dialogId}`);
-      console.log(`📨 User ${socket.userName} joined dialog ${dialogId}`);
+      console.log(`📨 User ${socket.userName} (${socket.userId}) joined dialog:${dialogId}`);
+      console.log(`   Current rooms:`, Array.from(socket.rooms));
     });
 
     // Handle user leaving a dialog room
@@ -128,6 +129,9 @@ export async function initializeWebSocket(server) {
    * Emit new message to dialog members
    */
   io.emitNewMessage = (dialogId, message) => {
+    console.log(`🔔 Emitting message:new to room dialog:${dialogId}`);
+    console.log(`   Message from: ${message.senderId}`);
+    console.log(`   Content: ${message.content}`);
     io.to(`dialog:${dialogId}`).emit('message:new', message);
   };
 

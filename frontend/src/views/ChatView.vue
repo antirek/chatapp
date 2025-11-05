@@ -109,14 +109,23 @@ onUnmounted(() => {
   websocket.off('dialog:update', handleDialogUpdate)
   websocket.off('typing:start', handleTypingStart)
   websocket.off('typing:stop', handleTypingStop)
+  websocket.off('connected', handleReconnect)
 })
 
 function setupWebSocketListeners() {
   websocket.on('message:new', handleNewMessage)
   websocket.on('message:update', handleMessageUpdate)
-  websocket.on('dialog:update', handleDialogUpdate)  // FIXED: was .off instead of .on
+  websocket.on('dialog:update', handleDialogUpdate)
   websocket.on('typing:start', handleTypingStart)
   websocket.on('typing:stop', handleTypingStop)
+  websocket.on('connected', handleReconnect)
+}
+
+function handleReconnect() {
+  // Rejoin current dialog room after reconnection
+  if (dialogsStore.currentDialog?.dialogId) {
+    websocket.joinDialog(dialogsStore.currentDialog.dialogId)
+  }
 }
 
 function handleNewMessage(message: any) {
