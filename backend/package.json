@@ -1,0 +1,27 @@
+{
+  "name": "chatpapp-backend",
+  "version": "1.0.0",
+  "description": "Backend for chat application",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": ["chat", "backend"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3",
+    "socket.io": "^4.6.1",
+    "axios": "^1.6.2",
+    "axios-logger": "^2.7.0",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "amqplib": "^0.10.3"
+  }
+}
+

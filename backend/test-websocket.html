@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: #4CAF50;
+            color: white;
+            padding: 20px;
+        }
+        
+        .header h1 {
+            margin-bottom: 5px;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background: #81C784;
+        }
+        
+        .status.disconnected {
+            background: #E57373;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .panel {
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 15px;
+        }
+        
+        .panel h2 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: #333;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+        }
+        
+        .log-entry.info { color: #4FC3F7; }
+        .log-entry.success { color: #81C784; }
+        .log-entry.error { color: #E57373; }
+        .log-entry.warning { color: #FFB74D; }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔌 WebSocket Test Client</h1>
+            <p>Testing Chat Application WebSocket Server</p>
+            <div style="margin-top: 10px;">
+                Status: <span class="status disconnected" id="status">Disconnected</span>
+            </div>
+        </div>
+        
+        <div class="content">
+            <!-- Connection Panel -->
+            <div class="panel">
+                <h2>Connection</h2>
+                <div class="form-group">
+                    <label>Server URL:</label>
+                    <input type="text" id="serverUrl" value="http://localhost:3001">
+                </div>
+                <div class="form-group">
+                    <label>JWT Token:</label>
+                    <input type="text" id="token" placeholder="Paste your JWT token here">
+                </div>
+                <div class="actions">
+                    <button id="connectBtn" onclick="connect()">Connect</button>
+                    <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                </div>
+            </div>
+            
+            <!-- Dialog Actions -->
+            <div class="panel">
+                <h2>Dialog Actions</h2>
+                <div class="form-group">
+                    <label>Dialog ID:</label>
+                    <input type="text" id="dialogId" placeholder="Enter dialog ID">
+                </div>
+                <div class="actions">
+                    <button onclick="joinDialog()" disabled id="joinBtn">Join Dialog</button>
+                    <button onclick="leaveDialog()" disabled id="leaveBtn">Leave Dialog</button>
+                </div>
+                <div class="actions">
+                    <button onclick="startTyping()" disabled id="startTypingBtn">Start Typing</button>
+                    <button onclick="stopTyping()" disabled id="stopTypingBtn">Stop Typing</button>
+                </div>
+            </div>
+            
+            <!-- Event Log -->
+            <div class="panel full-width">
+                <h2>Event Log</h2>
+                <div class="log" id="log"></div>
+                <div class="actions">
+                    <button onclick="clearLog()">Clear Log</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        let socket = null;
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(connected) {
+            const status = document.getElementById('status');
+            status.className = `status ${connected ? 'connected' : 'disconnected'}`;
+            status.textContent = connected ? 'Connected' : 'Disconnected';
+            
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('joinBtn').disabled = !connected;
+            document.getElementById('leaveBtn').disabled = !connected;
+            document.getElementById('startTypingBtn').disabled = !connected;
+            document.getElementById('stopTypingBtn').disabled = !connected;
+        }
+        
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const token = document.getElementById('token').value;
+            
+            if (!token) {
+                alert('Please enter JWT token');
+                return;
+            }
+            
+            log('Connecting to ' + serverUrl + '...', 'info');
+            
+            socket = io(serverUrl, {
+                auth: { token }
+            });
+            
+            // Connection events
+            socket.on('connect', () => {
+                log('✅ Connected successfully', 'success');
+                updateStatus(true);
+            });
+            
+            socket.on('connect_error', (error) => {
+                log('❌ Connection error: ' + error.message, 'error');
+                updateStatus(false);
+            });
+            
+            socket.on('disconnect', () => {
+                log('❌ Disconnected', 'warning');
+                updateStatus(false);
+            });
+            
+            // Chat events
+            socket.on('user:online', (data) => {
+                log(`👤 User online: ${data.userName} (${data.userId})`, 'info');
+            });
+            
+            socket.on('user:offline', (data) => {
+                log(`👤 User offline: ${data.userId}`, 'info');
+            });
+            
+            socket.on('message:new', (message) => {
+                log(`💬 New message: ${JSON.stringify(message)}`, 'success');
+            });
+            
+            socket.on('message:status', (data) => {
+                log(`📖 Message status: ${data.messageId} - ${data.status} by ${data.userId}`, 'info');
+            });
+            
+            socket.on('message:reaction', (data) => {
+                log(`👍 New reaction: ${JSON.stringify(data)}`, 'info');
+            });
+            
+            socket.on('dialog:update', (update) => {
+                log(`📝 Dialog update: ${JSON.stringify(update)}`, 'info');
+            });
+            
+            socket.on('typing:start', (data) => {
+                log(`✍️ ${data.userName} is typing in dialog ${data.dialogId}`, 'info');
+            });
+            
+            socket.on('typing:stop', (data) => {
+                log(`✋ User ${data.userId} stopped typing in dialog ${data.dialogId}`, 'info');
+            });
+        }
+        
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                log('Disconnected', 'warning');
+                updateStatus(false);
+            }
+        }
+        
+        function joinDialog() {
+            const dialogId = document.getElementById('dialogId').value;
+            if (!dialogId) {
+                alert('Please enter dialog ID');
+                return;
+            }
+            socket.emit('dialog:join', dialogId);
+            log(`📨 Joined dialog: ${dialogId}`, 'success');
+        }
+        
+        function leaveDialog() {
+            const dialogId = document.getElementById('dialogId').value;
+            if (!dialogId) {
+                alert('Please enter dialog ID');
+                return;
+            }
+            socket.emit('dialog:leave', dialogId);
+            log(`📭 Left dialog: ${dialogId}`, 'warning');
+        }
+        
+        function startTyping() {
+            const dialogId = document.getElementById('dialogId').value;
+            if (!dialogId) {
+                alert('Please enter dialog ID');
+                return;
+            }
+            socket.emit('typing:start', { dialogId });
+            log(`✍️ Started typing in dialog: ${dialogId}`, 'info');
+        }
+        
+        function stopTyping() {
+            const dialogId = document.getElementById('dialogId').value;
+            if (!dialogId) {
+                alert('Please enter dialog ID');
+                return;
+            }
+            socket.emit('typing:stop', { dialogId });
+            log(`✋ Stopped typing in dialog: ${dialogId}`, 'info');
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            log('Log cleared', 'info');
+        }
+        
+        // Initial state
+        updateStatus(false);
+        log('WebSocket Test Client ready', 'success');
+    </script>
+</body>
+</html>
+
