@@ -40,8 +40,9 @@ class WebSocketService {
       this.emit('error', error)
     })
 
-    // Chat3 Updates
+    // ✅ Chat3 Updates from RabbitMQ
     this.socket.on('chat3:update', (update: Chat3Update) => {
+      console.log('📬 Received Chat3 Update:', update.eventType, update.data)
       this.emit('chat3:update', update)
     })
 
@@ -76,15 +77,8 @@ class WebSocketService {
     })
   }
 
-  // Join dialog room
-  joinDialog(dialogId: string) {
-    this.socket?.emit('dialog:join', dialogId)
-  }
-
-  // Leave dialog room
-  leaveDialog(dialogId: string) {
-    this.socket?.emit('dialog:leave', dialogId)
-  }
+  // ✅ Pure RabbitMQ architecture - no Socket.io room management needed
+  // Updates now come through RabbitMQ, no need to join Socket.io rooms
 
   // Send typing start
   startTyping(dialogId: string) {

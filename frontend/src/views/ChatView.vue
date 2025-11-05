@@ -104,6 +104,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   // Clean up WebSocket listeners
+  websocket.off('chat3:update', handleChat3Update)
   websocket.off('message:new', handleNewMessage)
   websocket.off('message:update', handleMessageUpdate)
   websocket.off('dialog:update', handleDialogUpdate)
@@ -113,6 +114,9 @@ onUnmounted(() => {
 })
 
 function setupWebSocketListeners() {
+  // ✅ RabbitMQ Chat3 Updates
+  websocket.on('chat3:update', handleChat3Update)
+  
   websocket.on('message:new', handleNewMessage)
   websocket.on('message:update', handleMessageUpdate)
   websocket.on('dialog:update', handleDialogUpdate)
@@ -122,9 +126,32 @@ function setupWebSocketListeners() {
 }
 
 function handleReconnect() {
-  // Rejoin current dialog room after reconnection
-  if (dialogsStore.currentDialog?.dialogId) {
-    websocket.joinDialog(dialogsStore.currentDialog.dialogId)
+  // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
+  console.log('🔄 WebSocket reconnected, updates will come through RabbitMQ')
+}
+
+function handleChat3Update(update: any) {
+  console.log('🔄 Processing Chat3 Update:', update.eventType, update.data)
+  
+  // Handle different update types from RabbitMQ
+  switch (update.eventType) {
+    case 'message.create':
+      // New message - add to store
+      handleNewMessage(update.data)
+      break
+    
+    case 'message.update':
+      // Message updated (status, reactions, etc.)
+      handleMessageUpdate(update)
+      break
+    
+    case 'dialog.update':
+      // Dialog updated
+      handleDialogUpdate(update)
+      break
+    
+    default:
+      console.log('⚠️  Unknown update type:', update.eventType)
   }
 }
 
@@ -169,8 +196,7 @@ async function selectDialog(dialogId: string) {
   await dialogsStore.selectDialog(dialogId)
   
   if (dialogsStore.currentDialog) {
-    // Join dialog room via WebSocket
-    websocket.joinDialog(dialogId)
+    // ✅ Pure RabbitMQ - updates come through user queue automatically
     
     // Load messages
     await messagesStore.fetchMessages(dialogId)

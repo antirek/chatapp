@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import AuthService from '../services/AuthService.js';
-import RabbitMQService from '../services/RabbitMQService.js';
+import rabbitmqConsumer from '../services/rabbitmqConsumer.js';
 
 /**
  * Initialize WebSocket server
@@ -13,11 +13,11 @@ export async function initializeWebSocket(server) {
     },
   });
 
-  // Connect to RabbitMQ
+  // Connect to RabbitMQ Consumer for Updates
   try {
-    await RabbitMQService.connect();
+    await rabbitmqConsumer.connect();
   } catch (error) {
-    console.error('⚠️  Failed to connect to RabbitMQ. Updates will not be available.');
+    console.error('⚠️  Failed to connect to RabbitMQ Consumer. Updates will not be available.');
     console.error('   Error:', error.message);
   }
 
@@ -50,13 +50,15 @@ export async function initializeWebSocket(server) {
     // Track connected user
     connectedUsers.set(socket.userId, socket.id);
 
-    // Subscribe user to RabbitMQ updates
+    // ✅ Create RabbitMQ queue for user and subscribe to updates
     try {
-      await RabbitMQService.subscribeUser(socket.userId, async (update) => {
-        // Forward update to user via WebSocket
+      await rabbitmqConsumer.createUserQueue(socket.userId, async (update) => {
+        console.log(`➡️  Sending update to ${socket.userId}:`, update.eventType);
+        
+        // Forward raw update to client
         socket.emit('chat3:update', update);
         
-        // Also emit specific event based on eventType
+        // Also emit specific event based on eventType for compatibility
         if (update.eventType === 'message.create') {
           socket.emit('message:new', update.data);
         } else if (update.eventType.startsWith('message.')) {
@@ -66,7 +68,7 @@ export async function initializeWebSocket(server) {
         }
       });
     } catch (error) {
-      console.error(`❌ Failed to subscribe user ${socket.userId} to RabbitMQ:`, error.message);
+      console.error(`❌ Failed to create RabbitMQ queue for ${socket.userId}:`, error.message);
     }
 
     // Notify user is online
@@ -75,17 +77,15 @@ export async function initializeWebSocket(server) {
       userName: socket.userName,
     });
 
-    // Handle user joining a dialog room
+    // 🔄 HYBRID: Keep dialog:join for fallback
     socket.on('dialog:join', (dialogId) => {
       socket.join(`dialog:${dialogId}`);
-      console.log(`📨 User ${socket.userName} (${socket.userId}) joined dialog:${dialogId}`);
-      console.log(`   Current rooms:`, Array.from(socket.rooms));
+      console.log(`📨 [HYBRID] User ${socket.userName} joined dialog:${dialogId}`);
     });
 
-    // Handle user leaving a dialog room
     socket.on('dialog:leave', (dialogId) => {
       socket.leave(`dialog:${dialogId}`);
-      console.log(`📭 User ${socket.userName} left dialog ${dialogId}`);
+      console.log(`📭 [HYBRID] User ${socket.userName} left dialog:${dialogId}`);
     });
 
     // Handle typing indicator
@@ -110,11 +110,11 @@ export async function initializeWebSocket(server) {
       
       connectedUsers.delete(socket.userId);
       
-      // Unsubscribe from RabbitMQ updates
+      // ⏸️  Stop consumer (queue preserved for 1h to accumulate updates)
       try {
-        await RabbitMQService.unsubscribeUser(socket.userId);
+        await rabbitmqConsumer.stopUserConsumer(socket.userId);
       } catch (error) {
-        console.error(`❌ Failed to unsubscribe user ${socket.userId}:`, error.message);
+        console.error(`❌ Failed to stop consumer for ${socket.userId}:`, error.message);
       }
       
       socket.broadcast.emit('user:offline', {
@@ -123,45 +123,7 @@ export async function initializeWebSocket(server) {
     });
   });
 
-  // Helper functions to emit events from other parts of the application
-
-  /**
-   * Emit new message to dialog members
-   */
-  io.emitNewMessage = (dialogId, message) => {
-    console.log(`🔔 Emitting message:new to room dialog:${dialogId}`);
-    console.log(`   Message from: ${message.senderId}`);
-    console.log(`   Content: ${message.content}`);
-    io.to(`dialog:${dialogId}`).emit('message:new', message);
-  };
-
-  /**
-   * Emit message status update
-   */
-  io.emitMessageStatus = (dialogId, messageId, userId, status) => {
-    io.to(`dialog:${dialogId}`).emit('message:status', {
-      messageId,
-      userId,
-      status,
-    });
-  };
-
-  /**
-   * Emit message reaction
-   */
-  io.emitMessageReaction = (dialogId, messageId, reaction) => {
-    io.to(`dialog:${dialogId}`).emit('message:reaction', {
-      messageId,
-      reaction,
-    });
-  };
-
-  /**
-   * Emit dialog update
-   */
-  io.emitDialogUpdate = (dialogId, update) => {
-    io.to(`dialog:${dialogId}`).emit('dialog:update', update);
-  };
+  // ✅ Pure RabbitMQ architecture - no fallback helpers needed
 
   /**
    * Check if user is online
