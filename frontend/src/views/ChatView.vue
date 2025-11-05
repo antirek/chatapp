@@ -1,5 +1,40 @@
 <template>
-  <div class="h-screen flex">
+  <div class="h-screen flex relative">
+    <!-- Audio Permission Hint -->
+    <Transition
+      enter-active-class="transition ease-out duration-300"
+      enter-from-class="opacity-0 -translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition ease-in duration-200"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 -translate-y-2"
+    >
+      <div
+        v-if="showAudioPermissionHint"
+        class="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-yellow-50 border border-yellow-200 rounded-lg shadow-lg p-4 max-w-md"
+      >
+        <div class="flex items-start space-x-3">
+          <div class="flex-shrink-0">
+            <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            </svg>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-yellow-800">Звуковые уведомления заблокированы</p>
+            <p class="text-xs text-yellow-700 mt-1">Кликните в любом месте страницы, чтобы включить звук</p>
+          </div>
+          <button
+            @click="showAudioPermissionHint = false"
+            class="flex-shrink-0 text-yellow-600 hover:text-yellow-800"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </Transition>
+    
     <!-- Sidebar with dialogs -->
     <div class="w-80 bg-white border-r border-gray-200 flex flex-col">
       <!-- Current User Info -->
@@ -94,12 +129,40 @@ const messagesStore = useMessagesStore()
 
 const isCreateDialogOpen = ref(false)
 
+// Audio notification system
+let audioContext: AudioContext | null = null
+const audioInitialized = ref(false)
+const showAudioPermissionHint = ref(false)
+
+// Initialize AudioContext on first user interaction
+function initializeAudio() {
+  if (!audioContext) {
+    try {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      audioInitialized.value = true
+      console.log('🔊 Audio context initialized')
+    } catch (error) {
+      console.error('Failed to initialize audio context:', error)
+    }
+  }
+}
+
 onMounted(async () => {
   // Load dialogs
   await dialogsStore.fetchDialogs()
 
   // Setup WebSocket listeners
   setupWebSocketListeners()
+  
+  // Initialize audio on first click/keypress
+  const initAudioOnce = () => {
+    initializeAudio()
+    document.removeEventListener('click', initAudioOnce)
+    document.removeEventListener('keydown', initAudioOnce)
+  }
+  
+  document.addEventListener('click', initAudioOnce, { once: true })
+  document.addEventListener('keydown', initAudioOnce, { once: true })
 })
 
 onUnmounted(() => {
@@ -111,6 +174,12 @@ onUnmounted(() => {
   websocket.off('typing:start', handleTypingStart)
   websocket.off('typing:stop', handleTypingStop)
   websocket.off('connected', handleReconnect)
+  
+  // Clean up AudioContext
+  if (audioContext) {
+    audioContext.close()
+    audioContext = null
+  }
 })
 
 function setupWebSocketListeners() {
@@ -128,6 +197,80 @@ function setupWebSocketListeners() {
 function handleReconnect() {
   // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
   console.log('🔄 WebSocket reconnected, updates will come through RabbitMQ')
+}
+
+// Play notification sound for incoming messages
+function playNotificationSound() {
+  try {
+    // Ensure AudioContext is initialized
+    if (!audioContext) {
+      initializeAudio()
+    }
+    
+    if (!audioContext) {
+      console.warn('🔇 AudioContext not available')
+      // Show hint to user if audio blocked
+      if (!showAudioPermissionHint.value) {
+        showAudioPermissionHint.value = true
+        setTimeout(() => {
+          showAudioPermissionHint.value = false
+        }, 5000) // Hide after 5 seconds
+      }
+      return
+    }
+    
+    // Resume AudioContext if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().then(() => {
+        playSound()
+      }).catch((error) => {
+        console.warn('Could not resume audio context:', error)
+        showAudioPermissionHint.value = true
+        setTimeout(() => { showAudioPermissionHint.value = false }, 5000)
+      })
+    } else {
+      playSound()
+    }
+    
+    function playSound() {
+      if (!audioContext) return
+      
+      // Play a melodic two-note notification sound (like modern messengers)
+      const now = audioContext.currentTime
+      
+      // First note: E5 (659 Hz)
+      const osc1 = audioContext.createOscillator()
+      const gain1 = audioContext.createGain()
+      osc1.connect(gain1)
+      gain1.connect(audioContext.destination)
+      osc1.frequency.value = 659 // E5
+      osc1.type = 'sine'
+      
+      gain1.gain.setValueAtTime(0, now)
+      gain1.gain.linearRampToValueAtTime(0.25, now + 0.02)
+      gain1.gain.linearRampToValueAtTime(0, now + 0.12)
+      
+      osc1.start(now)
+      osc1.stop(now + 0.12)
+      
+      // Second note: A5 (880 Hz) - plays after first note
+      const osc2 = audioContext.createOscillator()
+      const gain2 = audioContext.createGain()
+      osc2.connect(gain2)
+      gain2.connect(audioContext.destination)
+      osc2.frequency.value = 880 // A5
+      osc2.type = 'sine'
+      
+      gain2.gain.setValueAtTime(0, now + 0.1)
+      gain2.gain.linearRampToValueAtTime(0.25, now + 0.12)
+      gain2.gain.linearRampToValueAtTime(0, now + 0.25)
+      
+      osc2.start(now + 0.1)
+      osc2.stop(now + 0.25)
+    }
+  } catch (error) {
+    console.warn('Could not play notification sound:', error)
+  }
 }
 
 function handleChat3Update(update: any) {
@@ -162,6 +305,14 @@ function handleNewMessage(message: any) {
     : message.dialogId
   
   const currentDialogId = dialogsStore.currentDialog?.dialogId
+  
+  // Check if message is from another user
+  const isFromOtherUser = message.senderId !== authStore.user?.userId
+  
+  // Play notification sound for messages from other users
+  if (isFromOtherUser) {
+    playNotificationSound()
+  }
   
   // Add to messages store if in current dialog
   if (messageDialogId === currentDialogId) {
