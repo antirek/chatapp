@@ -121,6 +121,7 @@ import api from '@/services/api'
 import DialogList from '@/components/DialogList.vue'
 import ChatWindow from '@/components/ChatWindow.vue'
 import CreateDialogModal from '@/components/CreateDialogModal.vue'
+import { useNotificationSound } from '@/composables/useNotificationSound'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -130,22 +131,13 @@ const messagesStore = useMessagesStore()
 const isCreateDialogOpen = ref(false)
 
 // Audio notification system
-let audioContext: AudioContext | null = null
-const audioInitialized = ref(false)
-const showAudioPermissionHint = ref(false)
-
-// Initialize AudioContext on first user interaction
-function initializeAudio() {
-  if (!audioContext) {
-    try {
-      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      audioInitialized.value = true
-      console.log('🔊 Audio context initialized')
-    } catch (error) {
-      console.error('Failed to initialize audio context:', error)
-    }
-  }
-}
+const { 
+  audioInitialized, 
+  showAudioPermissionHint, 
+  initializeAudio, 
+  playNotificationSound,
+  cleanupAudio 
+} = useNotificationSound()
 
 onMounted(async () => {
   // Load dialogs
@@ -153,16 +145,6 @@ onMounted(async () => {
 
   // Setup WebSocket listeners
   setupWebSocketListeners()
-  
-  // Initialize audio on first click/keypress
-  const initAudioOnce = () => {
-    initializeAudio()
-    document.removeEventListener('click', initAudioOnce)
-    document.removeEventListener('keydown', initAudioOnce)
-  }
-  
-  document.addEventListener('click', initAudioOnce, { once: true })
-  document.addEventListener('keydown', initAudioOnce, { once: true })
 })
 
 onUnmounted(() => {
@@ -175,11 +157,8 @@ onUnmounted(() => {
   websocket.off('typing:stop', handleTypingStop)
   websocket.off('connected', handleReconnect)
   
-  // Clean up AudioContext
-  if (audioContext) {
-    audioContext.close()
-    audioContext = null
-  }
+  // Clean up audio
+  cleanupAudio()
 })
 
 function setupWebSocketListeners() {
@@ -197,80 +176,6 @@ function setupWebSocketListeners() {
 function handleReconnect() {
   // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
   console.log('🔄 WebSocket reconnected, updates will come through RabbitMQ')
-}
-
-// Play notification sound for incoming messages
-function playNotificationSound() {
-  try {
-    // Ensure AudioContext is initialized
-    if (!audioContext) {
-      initializeAudio()
-    }
-    
-    if (!audioContext) {
-      console.warn('🔇 AudioContext not available')
-      // Show hint to user if audio blocked
-      if (!showAudioPermissionHint.value) {
-        showAudioPermissionHint.value = true
-        setTimeout(() => {
-          showAudioPermissionHint.value = false
-        }, 5000) // Hide after 5 seconds
-      }
-      return
-    }
-    
-    // Resume AudioContext if suspended (browser autoplay policy)
-    if (audioContext.state === 'suspended') {
-      audioContext.resume().then(() => {
-        playSound()
-      }).catch((error) => {
-        console.warn('Could not resume audio context:', error)
-        showAudioPermissionHint.value = true
-        setTimeout(() => { showAudioPermissionHint.value = false }, 5000)
-      })
-    } else {
-      playSound()
-    }
-    
-    function playSound() {
-      if (!audioContext) return
-      
-      // Play a melodic two-note notification sound (like modern messengers)
-      const now = audioContext.currentTime
-      
-      // First note: E5 (659 Hz)
-      const osc1 = audioContext.createOscillator()
-      const gain1 = audioContext.createGain()
-      osc1.connect(gain1)
-      gain1.connect(audioContext.destination)
-      osc1.frequency.value = 659 // E5
-      osc1.type = 'sine'
-      
-      gain1.gain.setValueAtTime(0, now)
-      gain1.gain.linearRampToValueAtTime(0.25, now + 0.02)
-      gain1.gain.linearRampToValueAtTime(0, now + 0.12)
-      
-      osc1.start(now)
-      osc1.stop(now + 0.12)
-      
-      // Second note: A5 (880 Hz) - plays after first note
-      const osc2 = audioContext.createOscillator()
-      const gain2 = audioContext.createGain()
-      osc2.connect(gain2)
-      gain2.connect(audioContext.destination)
-      osc2.frequency.value = 880 // A5
-      osc2.type = 'sine'
-      
-      gain2.gain.setValueAtTime(0, now + 0.1)
-      gain2.gain.linearRampToValueAtTime(0.25, now + 0.12)
-      gain2.gain.linearRampToValueAtTime(0, now + 0.25)
-      
-      osc2.start(now + 0.1)
-      osc2.stop(now + 0.25)
-    }
-  } catch (error) {
-    console.warn('Could not play notification sound:', error)
-  }
 }
 
 function handleChat3Update(update: any) {
