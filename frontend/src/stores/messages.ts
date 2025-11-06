@@ -60,8 +60,11 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   function addMessage(message: Message) {
-    // Check if message already exists
-    const exists = messages.value.some(m => m._id === message._id)
+    // Check if message already exists by messageId (primary) or _id (fallback)
+    const exists = messages.value.some(m => 
+      (message.messageId && m.messageId === message.messageId) || 
+      (m._id && m._id === message._id)
+    )
     if (!exists) {
       messages.value.push(message)
     }
