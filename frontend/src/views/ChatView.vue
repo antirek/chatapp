@@ -140,11 +140,16 @@ const {
 } = useNotificationSound()
 
 onMounted(async () => {
-  // Load dialogs
-  await dialogsStore.fetchDialogs()
-
-  // Setup WebSocket listeners
+  // Setup WebSocket listeners FIRST (before fetching data)
   setupWebSocketListeners()
+
+  // Load dialogs (don't block on error)
+  try {
+    await dialogsStore.fetchDialogs()
+  } catch (error) {
+    console.error('Failed to load dialogs on mount:', error)
+    // WebSocket listeners are still set up, so real-time updates will work
+  }
 })
 
 onUnmounted(() => {
@@ -189,6 +194,7 @@ function handleChat3Update(update: any) {
       break
     
     case 'message.update':
+    case 'message.status.update':
       // Message updated (status, reactions, etc.)
       handleMessageUpdate(update)
       break
@@ -236,10 +242,32 @@ function handleNewMessage(message: any) {
   }
 }
 
-function handleMessageUpdate(update: any) {
+async function handleMessageUpdate(update: any) {
   // Handle message updates (reactions, status, etc.)
-  if (update.data && update.data._id) {
-    messagesStore.updateMessage(update.data._id, update.data)
+  console.log('📝 handleMessageUpdate called:', update)
+  if (update.data) {
+    console.log('📝 update.data:', update.data)
+    const messageId = update.data.messageId || update.data._id
+    if (messageId) {
+      // For status updates, fetch full message to get updated statuses array
+      if (update.eventType === 'message.status.update') {
+        try {
+          console.log('🔄 Fetching full message for status update:', messageId)
+          const response = await api.getMessage(messageId)
+          if (response.success && response.data) {
+            console.log('✅ Got full message with statuses:', response.data.statuses)
+            messagesStore.updateMessage(messageId, response.data)
+          }
+        } catch (error) {
+          console.error('Failed to fetch message for status update:', error)
+          // Fallback to partial update
+          messagesStore.updateMessage(messageId, update.data)
+        }
+      } else {
+        console.log('📝 Calling updateMessage with messageId:', messageId, 'updates:', update.data)
+        messagesStore.updateMessage(messageId, update.data)
+      }
+    }
   }
 }
 

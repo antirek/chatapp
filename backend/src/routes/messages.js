@@ -83,7 +83,7 @@ router.get('/:messageId', async (req, res) => {
 
     res.json({
       success: true,
-      message: result.data,
+      data: result.data, // Consistent with other routes
     });
   } catch (error) {
     res.status(500).json({
@@ -108,10 +108,11 @@ router.post('/:messageId/status/:status', async (req, res) => {
       });
     }
 
-    await Chat3Client.updateMessageStatus(messageId, req.user.userId, status);
+    const result = await Chat3Client.updateMessageStatus(messageId, req.user.userId, status);
 
     res.json({
       success: true,
+      data: result.data, // Return status data (messageId, userId, status, etc.)
       message: 'Status updated',
     });
   } catch (error) {

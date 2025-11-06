@@ -31,7 +31,7 @@
       <!-- Messages List -->
       <div
         v-for="message in messagesStore.sortedMessages"
-        :key="message._id"
+        :key="`${message.messageId || message._id}-${JSON.stringify(message.statuses || [])}`"
         class="flex mb-3"
         :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
       >
@@ -54,12 +54,20 @@
             <!-- Message Content -->
             <div class="break-words">{{ message.content }}</div>
 
-            <!-- Message Time -->
+            <!-- Message Time with Read Status -->
             <div
-              class="text-xs mt-1"
+              class="text-xs mt-1 flex items-center gap-1"
               :class="isOwnMessage(message) ? 'text-primary-100' : 'text-gray-400'"
             >
-              {{ formatTime(message.createdAt) }}
+              <span>{{ formatTime(message.createdAt) }}</span>
+              
+              <!-- Read indicator for own messages -->
+              <span v-if="isOwnMessage(message) && isMessageReadByRecipient(message)" class="text-blue-400" title="Прочитано">
+                ✓✓
+              </span>
+              <span v-else-if="isOwnMessage(message)" class="text-primary-200 opacity-50" title="Отправлено">
+                ✓
+              </span>
             </div>
 
             <!-- Reactions -->
@@ -72,6 +80,18 @@
                 {{ emoji }} {{ count }}
               </span>
             </div>
+            
+            <!-- Mark as Read Button (for incoming messages only) -->
+            <button
+              v-if="!isOwnMessage(message) && !isMessageRead(message)"
+              @click="markMessageAsRead(message)"
+              class="text-xs mt-2 px-3 py-1 rounded-md transition-colors"
+              :class="isOwnMessage(message) 
+                ? 'bg-primary-500 hover:bg-primary-400 text-white' 
+                : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200'"
+            >
+              ✓ Отметить прочтенным
+            </button>
           </div>
         </div>
       </div>
@@ -145,6 +165,56 @@ function isOwnMessage(message: Message): boolean {
   const result = message.senderId === authStore.user?.userId
   console.log('isOwnMessage:', message.senderId, '===', authStore.user?.userId, '=', result)
   return result
+}
+
+function isMessageRead(message: Message): boolean {
+  // Check if current user has read this message
+  // Message.statuses is an array like: [{ userId: "usr_xxx", status: "read/unread" }]
+  const currentUserId = authStore.user?.userId
+  if (!currentUserId || !message.statuses || !Array.isArray(message.statuses)) {
+    return false
+  }
+  
+  const userStatus = message.statuses.find((s: any) => s.userId === currentUserId)
+  return userStatus?.status === 'read'
+}
+
+function isMessageReadByRecipient(message: Message): boolean {
+  // Check if message is read by ALL recipients (excluding sender)
+  if (!message.statuses || !Array.isArray(message.statuses)) {
+    return false
+  }
+  
+  const currentUserId = authStore.user?.userId
+  if (!currentUserId) return false
+  
+  // Get all recipient statuses (excluding sender)
+  const recipientStatuses = message.statuses.filter((s: any) => s.userId !== currentUserId)
+  
+  // If no recipients, return false
+  if (recipientStatuses.length === 0) {
+    return false
+  }
+  
+  // Check if ALL recipients have read the message
+  return recipientStatuses.every((s: any) => s.status === 'read')
+}
+
+async function markMessageAsRead(message: Message) {
+  if (!message.messageId && !message._id) {
+    console.error('Cannot mark message as read: no ID')
+    return
+  }
+  
+  try {
+    const messageId = message.messageId || message._id!
+    await messagesStore.markAsRead(messageId)
+    
+    // Status will be updated via WebSocket update (message.status.update)
+    console.log('✅ Marked as read, waiting for WebSocket update...')
+  } catch (error) {
+    console.error('Failed to mark message as read:', error)
+  }
 }
 
 function getSenderName(senderId: string): string {

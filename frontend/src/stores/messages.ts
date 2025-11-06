@@ -79,16 +79,88 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  function updateMessage(messageId: string, updates: Partial<Message>) {
-    const message = messages.value.find(m => m._id === messageId)
-    if (message) {
-      Object.assign(message, updates)
+  function updateMessage(messageId: string, updates: any) {
+    console.log('🛠️ updateMessage called with messageId:', messageId, 'updates:', updates)
+    
+    // Find message by messageId (primary) or _id (fallback)
+    const index = messages.value.findIndex(m => 
+      m.messageId === messageId || m._id === messageId
+    )
+    if (index === -1) {
+      console.log('❌ Message not found for update:', messageId)
+      return
+    }
+    
+    const message = messages.value[index]
+    console.log('🛠️ Found message:', message)
+    console.log('🛠️ Checking if status update:', { has_status: !!updates.status, has_userId: !!updates.userId })
+    
+    // Special handling for status updates
+    if (updates.status && updates.userId) {
+      // This is a status update: { messageId, userId, status, ... }
+      console.log('🔄 Status update:', { messageId, userId: updates.userId, status: updates.status })
+      
+      // Create new statuses array to trigger reactivity
+      const currentStatuses = message.statuses || []
+      const statusIndex = currentStatuses.findIndex((s: any) => s.userId === updates.userId)
+      
+      let newStatuses
+      if (statusIndex >= 0) {
+        // Update existing status - create new array
+        newStatuses = [...currentStatuses]
+        newStatuses[statusIndex] = {
+          ...newStatuses[statusIndex],
+          status: updates.status,
+          createdAt: updates.updatedAt || newStatuses[statusIndex].createdAt
+        }
+      } else {
+        // Add new status
+        newStatuses = [...currentStatuses, {
+          userId: updates.userId,
+          status: updates.status,
+          createdAt: updates.createdAt || updates.updatedAt
+        }]
+      }
+      
+      // Create new message object and new array to trigger reactivity
+      const updatedMessage = {
+        ...message,
+        statuses: newStatuses
+      }
+      
+      // Replace entire array to trigger reactivity
+      messages.value = [
+        ...messages.value.slice(0, index),
+        updatedMessage,
+        ...messages.value.slice(index + 1)
+      ]
+      
+      console.log('✅ Message updated with new statuses:', { messageId, statuses: newStatuses })
+    } else {
+      // Regular update - replace message object
+      const updatedMessage = {
+        ...message,
+        ...updates
+      }
+      
+      // Replace entire array to trigger reactivity
+      messages.value = [
+        ...messages.value.slice(0, index),
+        updatedMessage,
+        ...messages.value.slice(index + 1)
+      ]
     }
   }
 
   async function markAsRead(messageId: string) {
     try {
-      await api.updateMessageStatus(messageId, 'read')
+      const response = await api.updateMessageStatus(messageId, 'read')
+      
+      // Immediately update local state with response data (don't wait for WebSocket)
+      if (response.data) {
+        console.log('📥 Updating message status from API response:', response.data)
+        updateMessage(messageId, response.data)
+      }
     } catch (err) {
       console.error('Failed to mark message as read:', err)
     }

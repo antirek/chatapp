@@ -52,6 +52,11 @@ export interface Message {
   createdAt: string | number
   updatedAt?: string | number
   meta?: Record<string, any>
+  statuses?: Array<{
+    userId: string
+    status: 'read' | 'unread' | 'delivered'
+    createdAt?: string | number
+  }>
 }
 
 export interface SendMessageData {
