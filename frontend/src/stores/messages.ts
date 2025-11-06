@@ -12,9 +12,18 @@ export const useMessagesStore = defineStore('messages', () => {
   const error = ref<string | null>(null)
 
   const sortedMessages = computed(() => {
-    return [...messages.value].sort((a, b) => 
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    )
+    return [...messages.value].sort((a, b) => {
+      // Parse timestamps correctly - can be Unix timestamp (number/string) or ISO string
+      const timeA = typeof a.createdAt === 'string' 
+        ? (parseFloat(a.createdAt) || new Date(a.createdAt).getTime())
+        : a.createdAt
+      const timeB = typeof b.createdAt === 'string'
+        ? (parseFloat(b.createdAt) || new Date(b.createdAt).getTime())
+        : b.createdAt
+      
+      // Sort ascending (oldest first, newest last)
+      return timeA - timeB
+    })
   })
 
   async function fetchMessages(dialogId: string, params?: {
