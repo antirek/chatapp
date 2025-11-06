@@ -10,12 +10,15 @@ router.use(authenticate);
 /**
  * GET /api/messages/dialog/:dialogId
  * Get messages for a dialog
+ * Returns messages with statuses for all participants (needed for read indicators)
  */
 router.get('/dialog/:dialogId', async (req, res) => {
   try {
     const { dialogId } = req.params;
     const { page = 1, limit = 50 } = req.query;
 
+    // Use standard endpoint that returns statuses for all participants
+    // (not user context endpoint, as we need to see recipient statuses for ✓✓)
     const result = await Chat3Client.getDialogMessages(dialogId, {
       page,
       limit,

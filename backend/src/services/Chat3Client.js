@@ -83,6 +83,15 @@ class Chat3Client {
   }
 
   /**
+   * Get messages for a dialog in user context
+   * Returns messages with user-specific data (e.g., read status)
+   */
+  async getUserDialogMessages(userId, dialogId, params = {}) {
+    const response = await this.client.get(`/users/${userId}/dialogs/${dialogId}/messages`, { params });
+    return response.data;
+  }
+
+  /**
    * Create new message in dialog
    */
   async createMessage(dialogId, data) {

@@ -57,6 +57,13 @@ export interface Message {
     status: 'read' | 'unread' | 'delivered'
     createdAt?: string | number
   }>
+  // User context from Chat3 API (when fetched in user context)
+  context?: {
+    userId: string
+    isMine: boolean
+    myStatus: 'read' | 'unread' | 'delivered'
+    myReaction: string | null
+  }
 }
 
 export interface SendMessageData {

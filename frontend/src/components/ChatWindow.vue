@@ -169,9 +169,18 @@ function isOwnMessage(message: Message): boolean {
 
 function isMessageRead(message: Message): boolean {
   // Check if current user has read this message
-  // Message.statuses is an array like: [{ userId: "usr_xxx", status: "read/unread" }]
   const currentUserId = authStore.user?.userId
-  if (!currentUserId || !message.statuses || !Array.isArray(message.statuses)) {
+  if (!currentUserId) {
+    return false
+  }
+  
+  // Use context if available (from Chat3 user context API)
+  if (message.context) {
+    return message.context.myStatus === 'read'
+  }
+  
+  // Fallback to statuses array (for backward compatibility and WebSocket updates)
+  if (!message.statuses || !Array.isArray(message.statuses)) {
     return false
   }
   
@@ -181,6 +190,14 @@ function isMessageRead(message: Message): boolean {
 
 function isMessageReadByRecipient(message: Message): boolean {
   // Check if message is read by ALL recipients (excluding sender)
+  
+  // Use context if available (for incoming messages, check if we've read it)
+  if (message.context && !message.context.isMine) {
+    // For incoming messages, we can't determine recipient status from our context
+    // Fall through to statuses check
+  }
+  
+  // Check statuses array
   if (!message.statuses || !Array.isArray(message.statuses)) {
     return false
   }
