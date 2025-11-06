@@ -21,13 +21,14 @@ export interface RequestCodeResponse {
 // Dialog types
 export interface Dialog {
   dialogId: string
-  dialogName: string
+  name?: string // Chat3 format
+  dialogName?: string // Legacy format
   unreadCount: number
-  lastSeenAt?: string
-  lastMessageAt?: string
+  lastSeenAt?: string | number
+  lastMessageAt?: string | number
   isActive: boolean
-  joinedAt: string
-  lastInteractionAt: string
+  joinedAt: string | number
+  lastInteractionAt: string | number
   lastMessage?: LastMessage
 }
 
@@ -40,15 +41,16 @@ export interface LastMessage {
 
 // Message types
 export interface Message {
-  _id: string
+  _id?: string
+  messageId?: string
   tenantId?: string
   dialogId: string
   senderId: string
   content: string
   type: string
   reactionCounts?: Record<string, number>
-  createdAt: string
-  updatedAt: string
+  createdAt: string | number
+  updatedAt?: string | number
   meta?: Record<string, any>
 }
 

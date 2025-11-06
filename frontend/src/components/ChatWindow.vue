@@ -3,7 +3,7 @@
     <!-- Chat Header -->
     <div class="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
       <div class="flex-1">
-        <h2 class="text-lg font-semibold">{{ dialog.dialogName }}</h2>
+        <h2 class="text-lg font-semibold">{{ dialog.name || dialog.dialogName || 'Диалог' }}</h2>
         <p v-if="typingUsersText" class="text-sm text-primary-600 animate-pulse">
           {{ typingUsersText }}
         </p>
@@ -153,8 +153,32 @@ function getSenderName(senderId: string): string {
   return senderId
 }
 
-function formatTime(timestamp: string): string {
-  const date = new Date(timestamp)
+function formatTime(timestamp: string | number): string {
+  // Parse timestamp - can be:
+  // 1. Unix timestamp in milliseconds (number or string): 1762419282731 or "1762419282731.615234"
+  // 2. ISO date string: "2025-11-06T08:54:42.732Z"
+  let date: Date
+  
+  if (typeof timestamp === 'string') {
+    // Try parsing as number first (Unix timestamp with microseconds)
+    const numericTimestamp = parseFloat(timestamp)
+    if (!isNaN(numericTimestamp)) {
+      // Unix timestamp in milliseconds (Chat3 format)
+      date = new Date(Math.floor(numericTimestamp))
+    } else {
+      // ISO date string
+      date = new Date(timestamp)
+    }
+  } else {
+    // Number timestamp
+    date = new Date(timestamp)
+  }
+  
+  // Validate date
+  if (isNaN(date.getTime())) {
+    return ''
+  }
+  
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 

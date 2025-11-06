@@ -193,8 +193,11 @@ function handleChat3Update(update: any) {
       handleMessageUpdate(update)
       break
     
+    case 'dialog.create':
     case 'dialog.update':
-      // Dialog updated
+    case 'dialog.member.add':
+    case 'dialog.member.remove':
+      // Dialog created, updated, or members changed - refresh dialogs list
       handleDialogUpdate(update)
       break
     
