@@ -115,6 +115,15 @@
           Добавить участников
         </button>
         <button
+          v-if="canLeaveGroup"
+          @click="leaveGroup"
+          :disabled="isLeavingGroup"
+          class="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span v-if="isLeavingGroup">Выход...</span>
+          <span v-else>Покинуть группу</span>
+        </button>
+        <button
           @click="close"
           class="w-full btn-secondary"
         >
@@ -128,6 +137,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
+import { useDialogsStore } from '@/stores/dialogs'
 import Avatar from '@/components/Avatar.vue'
 import type { Dialog } from '@/types'
 
@@ -148,15 +159,33 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   'add-members': []
+  'left-group': []
 }>()
+
+const authStore = useAuthStore()
+const dialogsStore = useDialogsStore()
 
 const members = ref<Member[]>([])
 const isLoading = ref(false)
 const isLoadingMore = ref(false)
+const isLeavingGroup = ref(false)
 const currentPage = ref(1)
 const totalMembers = ref(0)
 const hasMorePages = ref(false)
 const limit = 20
+
+const currentUserMember = computed(() => {
+  if (!authStore.user?.userId) return null
+  return members.value.find(m => m.userId === authStore.user?.userId)
+})
+
+const isCurrentUserOwner = computed(() => {
+  return currentUserMember.value?.role === 'owner'
+})
+
+const canLeaveGroup = computed(() => {
+  return !isCurrentUserOwner.value && currentUserMember.value !== null
+})
 
 // Load members on open
 watch(() => props.isOpen, (newValue) => {
@@ -262,6 +291,32 @@ function formatPhone(phone: string): string {
   }
   
   return phone
+}
+
+async function leaveGroup() {
+  if (!props.dialog || !authStore.user?.userId || !canLeaveGroup.value) return
+
+  if (!confirm('Вы уверены, что хотите покинуть группу?')) {
+    return
+  }
+
+  isLeavingGroup.value = true
+
+  try {
+    await api.removeDialogMember(props.dialog.dialogId, authStore.user.userId)
+    
+    // Reload dialogs list
+    await dialogsStore.loadDialogs()
+    
+    // Emit event and close modal
+    emit('left-group')
+    emit('close')
+  } catch (error: any) {
+    console.error('Failed to leave group:', error)
+    alert('Не удалось покинуть группу: ' + (error?.response?.data?.error || error?.message || 'Неизвестная ошибка'))
+  } finally {
+    isLeavingGroup.value = false
+  }
 }
 </script>
 

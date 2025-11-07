@@ -128,6 +128,7 @@
         v-if="dialogsStore.currentDialog" 
         :dialog="dialogsStore.currentDialog"
         :key="`chat-${dialogsStore.currentDialog.dialogId}-${currentUserAvatar ? 'has-avatar' : 'no-avatar'}`"
+        @left-group="handleLeftGroup"
       />
       
       <!-- Empty State -->
@@ -439,6 +440,11 @@ async function selectDialog(dialogId: string) {
 function logout() {
   authStore.logout()
   router.push({ name: 'login' })
+}
+
+function handleLeftGroup() {
+  // Clear current dialog when user leaves group
+  dialogsStore.currentDialog = null
 }
 
 async function loadCurrentUserAvatar() {

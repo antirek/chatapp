@@ -163,6 +163,7 @@
       :dialog="dialog"
       @close="closeUserInfo"
       @add-members="handleAddMembers"
+      @left-group="handleLeftGroup"
     />
 
     <!-- Add Group Members Modal -->
@@ -191,6 +192,10 @@ import type { Dialog, Message } from '@/types'
 
 const props = defineProps<{
   dialog: Dialog
+}>()
+
+const emit = defineEmits<{
+  'left-group': []
 }>()
 
 interface ImageMessagePayload {
@@ -608,6 +613,11 @@ async function handleMembersAdded() {
   
   // Reload messages to get any updates
   await messagesStore.loadMessages(props.dialog.dialogId)
+}
+
+function handleLeftGroup() {
+  // Emit event to parent (ChatView) to clear current dialog
+  emit('left-group')
 }
 </script>
 
