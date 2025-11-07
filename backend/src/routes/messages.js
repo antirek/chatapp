@@ -11,18 +11,43 @@ router.use(authenticate);
  * GET /api/messages/dialog/:dialogId
  * Get messages for a dialog
  * Returns messages with statuses for all participants (needed for read indicators)
+ * 
+ * Note: Using getUserDialogMessages for user-specific context (better performance),
+ * but we still need statuses for all participants to show ✓✓ indicators.
+ * The user context endpoint provides user-specific data but may not include all statuses.
  */
 router.get('/dialog/:dialogId', async (req, res) => {
   try {
     const { dialogId } = req.params;
     const { page = 1, limit = 50 } = req.query;
+    const currentUserId = req.user.userId;
 
-    // Use standard endpoint that returns statuses for all participants
-    // (not user context endpoint, as we need to see recipient statuses for ✓✓)
-    const result = await Chat3Client.getDialogMessages(dialogId, {
-      page,
-      limit,
-    });
+    // Use user context endpoint for better performance and user-specific data
+    // This returns messages with user-specific context
+    let result;
+    try {
+      result = await Chat3Client.getUserDialogMessages(currentUserId, dialogId, {
+        page,
+        limit,
+      });
+      
+      // Check if statuses for all participants are present (needed for ✓✓ indicators)
+      // If not, fall back to standard endpoint which returns all statuses
+      if (result.data && result.data.length > 0 && !result.data[0].statuses) {
+        console.log(`⚠️ User context endpoint doesn't return statuses, falling back to standard endpoint`);
+        result = await Chat3Client.getDialogMessages(dialogId, {
+          page,
+          limit,
+        });
+      }
+    } catch (error) {
+      // Fall back to standard endpoint if user context endpoint fails
+      console.warn(`⚠️ User context endpoint failed, falling back to standard endpoint:`, error.message);
+      result = await Chat3Client.getDialogMessages(dialogId, {
+        page,
+        limit,
+      });
+    }
 
     res.json({
       success: true,
