@@ -153,60 +153,43 @@ router.post('/', async (req, res) => {
 
       console.log(`🔍 Checking for existing P2P dialog between ${currentUserId} and ${otherUserId}`);
 
-      // Get all user dialogs with pagination
-      let userPage = 1;
-      let hasMoreDialogs = true;
-      let existingDialog = null;
+      // Use filter to find P2P dialogs where the other user is a member
+      // Filter format: (member,in,[userId])&(meta.type,eq,p2p)
+      const filter = `(member,in,[${otherUserId}])&(meta.type,eq,p2p)`;
+      
+      const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
+        page: 1,
+        limit: 100, // Max allowed by Chat3 API
+        filter: filter,
+      });
 
-      while (hasMoreDialogs && !existingDialog) {
-        const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
-          page: userPage,
-          limit: 100, // Max allowed by Chat3 API
-        });
-
-        if (!userDialogs.data || userDialogs.data.length === 0) {
-          hasMoreDialogs = false;
-          break;
-        }
-
-        // Find existing P2P dialog with the other user
+      // Check if any of the found dialogs has exactly 2 members: current user and the other user
+      if (userDialogs.data && userDialogs.data.length > 0) {
         for (const dialog of userDialogs.data) {
-          const dialogType = dialog.meta?.type || dialog.type;
-          
-          if (dialogType === 'p2p') {
-            // Get full dialog info to check members
-            try {
-              const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
-              const members = (fullDialog.data || fullDialog).members || [];
+          // Get full dialog info to verify it has exactly 2 members
+          try {
+            const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
+            const members = (fullDialog.data || fullDialog).members || [];
+            
+            // Check if this dialog has exactly 2 members: current user and the other user
+            const dialogMemberIds = members.map(m => m.userId);
+            if (dialogMemberIds.length === 2 && 
+                dialogMemberIds.includes(currentUserId) && 
+                dialogMemberIds.includes(otherUserId)) {
+              console.log(`✅ Found existing P2P dialog ${dialog.dialogId} between ${currentUserId} and ${otherUserId}`);
               
-              // Check if this dialog has exactly 2 members: current user and the other user
-              const dialogMemberIds = members.map(m => m.userId);
-              if (dialogMemberIds.length === 2 && 
-                  dialogMemberIds.includes(currentUserId) && 
-                  dialogMemberIds.includes(otherUserId)) {
-                console.log(`✅ Found existing P2P dialog ${dialog.dialogId} between ${currentUserId} and ${otherUserId}`);
-                existingDialog = dialog;
-                break;
-              }
-            } catch (error) {
-              console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
-              // Continue checking other dialogs
+              // Return existing dialog
+              return res.json({
+                success: true,
+                data: dialog,
+                message: 'Dialog already exists',
+              });
             }
+          } catch (error) {
+            console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
+            // Continue checking other dialogs
           }
         }
-
-        // Check if there are more pages
-        hasMoreDialogs = userDialogs.pagination && userPage < userDialogs.pagination.pages;
-        userPage++;
-      }
-
-      if (existingDialog) {
-        // Return existing dialog
-        return res.json({
-          success: true,
-          data: existingDialog,
-          message: 'Dialog already exists',
-        });
       }
 
       console.log(`ℹ️ No existing P2P dialog found, creating new one`);
