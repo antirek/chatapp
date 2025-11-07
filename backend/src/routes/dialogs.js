@@ -133,7 +133,7 @@ router.get('/', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const { name, memberIds = [], chatType } = req.body;
+    const { name, memberIds = [], chatType, groupType = 'private' } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -182,6 +182,16 @@ router.post('/', async (req, res) => {
       console.warn(`Failed to set chat type meta tag for dialog ${dialogId}:`, error.message);
     }
 
+    // Set group type meta tag (only for group chats)
+    if (finalChatType === 'group') {
+      try {
+        await Chat3Client.setMeta('dialog', dialogId, 'groupType', { value: groupType });
+        console.log(`✅ Set groupType: ${groupType} for dialog ${dialogId}`);
+      } catch (error) {
+        console.warn(`Failed to set groupType meta tag for dialog ${dialogId}:`, error.message);
+      }
+    }
+
     // Fetch full dialog data with transformed structure
     const fullDialog = await Chat3Client.getUserDialogs(req.user.userId, {
       dialogId,
@@ -198,6 +208,115 @@ router.post('/', async (req, res) => {
       data: createdDialog,
     });
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/dialogs/public
+ * Get all public groups
+ */
+router.get('/public', async (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const currentUserId = req.user.userId;
+    
+    // Build filter for public groups: (meta.type,eq,group)&(meta.groupType,eq,public)
+    const filter = `(meta.type,eq,group)&(meta.groupType,eq,public)`;
+    
+    // Get all public groups using filter (without user context)
+    const result = await Chat3Client.getDialogs({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      filter: filter,
+    });
+
+    const publicGroups = result.data || [];
+
+    // Get user's dialog IDs to exclude already joined groups
+    const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
+      limit: 1000, // Get all user dialogs
+    });
+    const userDialogIds = new Set((userDialogs.data || []).map(d => d.dialogId));
+
+    // Filter out groups user is already a member of
+    const availableGroups = publicGroups.filter(group => !userDialogIds.has(group.dialogId));
+
+    res.json({
+      success: true,
+      data: availableGroups,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.pagination?.total || availableGroups.length,
+        pages: result.pagination?.pages || Math.ceil(availableGroups.length / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error('Failed to get public groups:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/dialogs/:dialogId/join
+ * Join a public group
+ */
+router.post('/:dialogId/join', async (req, res) => {
+  try {
+    const { dialogId } = req.params;
+    const currentUserId = req.user.userId;
+
+    // Check if dialog exists and is public
+    const dialog = await Chat3Client.getDialog(dialogId);
+    const dialogType = dialog.data?.meta?.type || dialog.data?.type;
+    const groupType = dialog.data?.meta?.groupType;
+
+    if (dialogType !== 'group') {
+      return res.status(400).json({
+        success: false,
+        error: 'Dialog is not a group',
+      });
+    }
+
+    if (groupType !== 'public') {
+      return res.status(403).json({
+        success: false,
+        error: 'Group is not public',
+      });
+    }
+
+    // Check if user is already a member
+    const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
+      dialogId,
+      limit: 1,
+    });
+
+    if (userDialogs.data && userDialogs.data.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'User is already a member of this group',
+      });
+    }
+
+    // Add user to group
+    await Chat3Client.addDialogMember(dialogId, currentUserId);
+
+    // Get updated dialog
+    const updatedDialog = await Chat3Client.getDialog(dialogId);
+
+    res.json({
+      success: true,
+      data: updatedDialog.data,
+    });
+  } catch (error) {
+    console.error('Failed to join group:', error);
     res.status(500).json({
       success: false,
       error: error.message,

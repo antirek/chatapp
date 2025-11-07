@@ -77,6 +77,7 @@ class ApiService {
     name: string
     memberIds?: string[]
     chatType?: 'p2p' | 'group'
+    groupType?: 'private' | 'public'
   }): Promise<ApiResponse<Dialog>> {
     const { data } = await this.api.post('/dialogs', dialogData)
     return data
@@ -84,6 +85,19 @@ class ApiService {
 
   async getDialog(dialogId: string): Promise<ApiResponse<Dialog>> {
     const { data } = await this.api.get(`/dialogs/${dialogId}`)
+    return data
+  }
+
+  async getPublicGroups(params?: {
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<Dialog>> {
+    const { data } = await this.api.get('/dialogs/public', { params })
+    return data
+  }
+
+  async joinGroup(dialogId: string): Promise<ApiResponse<Dialog>> {
+    const { data } = await this.api.post(`/dialogs/${dialogId}/join`)
     return data
   }
 

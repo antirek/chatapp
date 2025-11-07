@@ -36,6 +36,40 @@
           />
         </div>
 
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            Тип группы
+          </label>
+          <div class="space-y-2">
+            <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors" :class="{ 'border-blue-500 bg-blue-50': groupType === 'private' }">
+              <input
+                type="radio"
+                v-model="groupType"
+                value="private"
+                class="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                :disabled="isCreating"
+              />
+              <div class="flex-1">
+                <div class="font-medium text-gray-900">Приватная</div>
+                <div class="text-sm text-gray-500">Только участники могут видеть группу</div>
+              </div>
+            </label>
+            <label class="flex items-center space-x-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors" :class="{ 'border-blue-500 bg-blue-50': groupType === 'public' }">
+              <input
+                type="radio"
+                v-model="groupType"
+                value="public"
+                class="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                :disabled="isCreating"
+              />
+              <div class="flex-1">
+                <div class="font-medium text-gray-900">Публичная</div>
+                <div class="text-sm text-gray-500">Группа видна всем пользователям</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         <!-- Error message -->
         <div v-if="error" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
           <p class="text-sm text-red-600">{{ error }}</p>
@@ -84,6 +118,7 @@ const emit = defineEmits<{
 }>()
 
 const groupName = ref('')
+const groupType = ref<'private' | 'public'>('private')
 const isCreating = ref(false)
 const error = ref('')
 
@@ -91,6 +126,7 @@ const error = ref('')
 watch(() => props.isOpen, (newValue) => {
   if (newValue) {
     groupName.value = ''
+    groupType.value = 'private'
     error.value = ''
     isCreating.value = false
   }
@@ -108,7 +144,8 @@ async function createGroup() {
     const response = await api.createDialog({
       name: groupName.value.trim(),
       memberIds: [],
-      chatType: 'group'
+      chatType: 'group',
+      groupType: groupType.value
     })
 
     if (response.success && response.data) {
