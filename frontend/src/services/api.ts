@@ -160,6 +160,21 @@ class ApiService {
     const { data } = await this.api.get(`/users/${userId}`)
     return data
   }
+
+  async getMyProfile(): Promise<ApiResponse> {
+    const { data } = await this.api.get('/users/me')
+    return data
+  }
+
+  async updateAvatar(avatar: string): Promise<ApiResponse<{ avatar: string }>> {
+    const { data } = await this.api.put('/users/me/avatar', { avatar })
+    return data
+  }
+
+  async deleteAvatar(): Promise<ApiResponse> {
+    const { data } = await this.api.delete('/users/me/avatar')
+    return data
+  }
 }
 
 export default new ApiService()

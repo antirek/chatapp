@@ -40,20 +40,34 @@
       <!-- Current User Info -->
       <div v-if="authStore.user" class="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
         <div class="flex items-center space-x-3">
-          <!-- Avatar with initials -->
-          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold shadow-md">
-            {{ getUserInitials(authStore.user.name) }}
-          </div>
+          <!-- Avatar -->
+          <button
+            @click="openUserProfile"
+            class="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+            title="Мой профиль"
+          >
+            <Avatar
+              :avatar="currentUserAvatar"
+              :name="authStore.user.name"
+              :userId="authStore.user.userId"
+              size="md"
+              shape="circle"
+            />
+          </button>
           
           <!-- User info -->
-          <div class="flex-1 min-w-0">
+          <button
+            @click="openUserProfile"
+            class="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+            title="Мой профиль"
+          >
             <div class="font-semibold text-gray-900 text-sm truncate">
               {{ authStore.user.name }}
             </div>
             <div class="text-xs text-gray-600">
               {{ formatPhone(authStore.user.phone) }}
             </div>
-          </div>
+          </button>
 
           <!-- Logout button -->
           <button
@@ -88,7 +102,11 @@
 
     <!-- Chat Window -->
     <div class="flex-1 flex flex-col">
-      <ChatWindow v-if="dialogsStore.currentDialog" :dialog="dialogsStore.currentDialog" />
+      <ChatWindow 
+        v-if="dialogsStore.currentDialog" 
+        :dialog="dialogsStore.currentDialog"
+        :key="`chat-${dialogsStore.currentDialog.dialogId}-${currentUserAvatar ? 'has-avatar' : 'no-avatar'}`"
+      />
       
       <!-- Empty State -->
       <div v-else class="flex-1 flex items-center justify-center text-gray-400">
@@ -100,6 +118,13 @@
         </div>
       </div>
     </div>
+
+    <!-- User Profile Modal -->
+    <UserProfile
+      :is-open="isUserProfileOpen"
+      @close="closeUserProfile"
+      @avatar-updated="handleAvatarUpdated"
+    />
 
     <!-- Create Dialog Modal (outside main layout) -->
     <CreateDialogModal
@@ -121,6 +146,8 @@ import api from '@/services/api'
 import DialogList from '@/components/DialogList.vue'
 import ChatWindow from '@/components/ChatWindow.vue'
 import CreateDialogModal from '@/components/CreateDialogModal.vue'
+import UserProfile from '@/components/UserProfile.vue'
+import Avatar from '@/components/Avatar.vue'
 import { useNotificationSound } from '@/composables/useNotificationSound'
 
 const router = useRouter()
@@ -129,6 +156,8 @@ const dialogsStore = useDialogsStore()
 const messagesStore = useMessagesStore()
 
 const isCreateDialogOpen = ref(false)
+const isUserProfileOpen = ref(false)
+const currentUserAvatar = ref<string | null>(null)
 
 // Audio notification system
 const { 
@@ -150,6 +179,9 @@ onMounted(async () => {
     console.error('Failed to load dialogs on mount:', error)
     // WebSocket listeners are still set up, so real-time updates will work
   }
+
+  // Load current user avatar
+  await loadCurrentUserAvatar()
 })
 
 onUnmounted(() => {
@@ -356,14 +388,35 @@ function logout() {
   router.push({ name: 'login' })
 }
 
-function getUserInitials(name: string): string {
-  if (!name) return '?'
+async function loadCurrentUserAvatar() {
+  if (!authStore.user?.userId) return
   
-  const parts = name.trim().split(' ')
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
+  try {
+    const response = await api.getMyProfile()
+    if (response.success && response.data) {
+      currentUserAvatar.value = response.data.avatar || null
+    }
+  } catch (error) {
+    console.error('Failed to load current user avatar:', error)
   }
-  return name.substring(0, 2).toUpperCase()
+}
+
+function openUserProfile() {
+  isUserProfileOpen.value = true
+}
+
+function closeUserProfile() {
+  isUserProfileOpen.value = false
+}
+
+function handleAvatarUpdated(avatar: string | null) {
+  currentUserAvatar.value = avatar
+  console.log('✅ Avatar updated in ChatView:', avatar ? 'has avatar' : 'no avatar')
+  
+  // Reload dialogs to update avatars in dialog list
+  dialogsStore.fetchDialogs().catch(err => {
+    console.error('Failed to reload dialogs after avatar update:', err)
+  })
 }
 
 function formatPhone(phone: string): string {

@@ -26,25 +26,39 @@
         v-for="dialog in dialogsStore.dialogs"
         :key="dialog.dialogId"
         @click="$emit('select', dialog.dialogId)"
-        class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative"
+        class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
         :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
       >
-        <!-- Dialog Name -->
-        <div class="flex items-start justify-between mb-1">
-          <h3 class="font-semibold text-gray-900 truncate flex-1">
-            {{ dialog.name || dialog.dialogName || 'Диалог' }}
-          </h3>
-          
-          <!-- Time -->
-          <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2">
-            {{ formatTime(dialog.lastMessageAt) }}
-          </span>
+        <!-- Avatar -->
+        <div class="flex-shrink-0">
+          <Avatar
+            :avatar="getDialogAvatar(dialog)"
+            :name="dialog.name || dialog.dialogName || 'Диалог'"
+            :userId="getDialogOtherUserId(dialog)"
+            size="md"
+            shape="circle"
+          />
         </div>
 
-        <!-- Last Message -->
-        <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
-          {{ dialog.lastMessage.content }}
-        </p>
+        <!-- Dialog Content -->
+        <div class="flex-1 min-w-0">
+          <!-- Dialog Name -->
+          <div class="flex items-start justify-between mb-1">
+            <h3 class="font-semibold text-gray-900 truncate flex-1">
+              {{ dialog.name || dialog.dialogName || 'Диалог' }}
+            </h3>
+            
+            <!-- Time -->
+            <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
+              {{ formatTime(dialog.lastMessageAt) }}
+            </span>
+          </div>
+
+          <!-- Last Message -->
+          <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+            {{ dialog.lastMessage.content }}
+          </p>
+        </div>
 
         <!-- Unread Badge -->
         <div
@@ -67,13 +81,21 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useDialogsStore } from '@/stores/dialogs'
+import { useAuthStore } from '@/stores/auth'
+import api from '@/services/api'
+import Avatar from './Avatar.vue'
+import type { Dialog } from '@/types'
 
 defineEmits<{
   select: [dialogId: string]
 }>()
 
 const dialogsStore = useDialogsStore()
+const authStore = useAuthStore()
+const dialogAvatars = ref<Record<string, string | null>>({})
+const dialogOtherUsers = ref<Record<string, { userId: string; name: string }>>({})
 
 function isActive(dialogId: string): boolean {
   return dialogsStore.currentDialog?.dialogId === dialogId
@@ -84,6 +106,84 @@ async function retryLoadDialogs() {
     await dialogsStore.fetchDialogs()
   } catch (error) {
     console.error('Failed to retry loading dialogs:', error)
+  }
+}
+
+function getDialogOtherUserId(dialog: Dialog): string {
+  // Try to get other user ID from cache
+  if (dialogOtherUsers.value[dialog.dialogId]) {
+    return dialogOtherUsers.value[dialog.dialogId].userId
+  }
+  
+  // Try to get from last message sender
+  if (dialog.lastMessage?.senderId && dialog.lastMessage.senderId !== authStore.user?.userId) {
+    return dialog.lastMessage.senderId
+  }
+  
+  // Load dialog members to find other user
+  loadDialogOtherUser(dialog.dialogId)
+  
+  return ''
+}
+
+function getDialogAvatar(dialog: Dialog): string | null {
+  const otherUserId = getDialogOtherUserId(dialog)
+  if (!otherUserId) return null
+  
+  // Check cache
+  if (dialogAvatars.value[otherUserId] !== undefined) {
+    return dialogAvatars.value[otherUserId]
+  }
+  
+  // Load avatar
+  loadUserAvatar(otherUserId)
+  
+  return null
+}
+
+async function loadDialogOtherUser(dialogId: string) {
+  // Skip if already loading
+  if (dialogOtherUsers.value[dialogId]) {
+    return
+  }
+  
+  try {
+    const response = await api.getDialogMembers(dialogId)
+    if (response.success && response.data) {
+      const members = response.data
+      const otherMember = members.find((m: any) => m.userId !== authStore.user?.userId)
+      
+      if (otherMember && otherMember.userId) {
+        dialogOtherUsers.value[dialogId] = {
+          userId: otherMember.userId,
+          name: otherMember.name || ''
+        }
+        
+        // Load avatar for this user
+        loadUserAvatar(otherMember.userId)
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load dialog other user:', dialogId, error)
+  }
+}
+
+async function loadUserAvatar(userId: string) {
+  // Skip if already loading or cached
+  if (dialogAvatars.value[userId] !== undefined) {
+    return
+  }
+  
+  try {
+    const response = await api.getUser(userId)
+    if (response.success && response.data) {
+      const avatar = response.data.avatar || null
+      dialogAvatars.value[userId] = avatar
+    }
+  } catch (error) {
+    // If user not found or error, cache null
+    dialogAvatars.value[userId] = null
+    console.error('Failed to load user avatar:', userId, error)
   }
 }
 

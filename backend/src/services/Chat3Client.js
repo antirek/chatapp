@@ -169,6 +169,52 @@ class Chat3Client {
     return response.data;
   }
 
+  // ==================== USERS ====================
+
+  /**
+   * Create user in Chat3
+   */
+  async createUser(userId, data) {
+    const response = await this.client.post(`/users`, {
+      userId,
+      ...data
+    });
+    return response.data;
+  }
+
+  /**
+   * Get user by ID
+   */
+  async getUser(userId) {
+    const response = await this.client.get(`/users/${userId}`);
+    return response.data;
+  }
+
+  /**
+   * Update user
+   */
+  async updateUser(userId, data) {
+    const response = await this.client.put(`/users/${userId}`, data);
+    return response.data;
+  }
+
+  /**
+   * Set user meta key
+   * Note: Use getUser() to get user with meta tags (if included in response)
+   */
+  async setUserMeta(userId, key, data) {
+    const response = await this.client.put(`/users/${userId}/meta/${key}`, data);
+    return response.data;
+  }
+
+  /**
+   * Delete user meta key
+   */
+  async deleteUserMeta(userId, key) {
+    const response = await this.client.delete(`/users/${userId}/meta/${key}`);
+    return response.data;
+  }
+
   // ==================== META ====================
 
   /**

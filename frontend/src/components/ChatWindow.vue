@@ -32,9 +32,20 @@
       <div
         v-for="message in messagesStore.sortedMessages"
         :key="`${message.messageId || message._id}-${JSON.stringify(message.statuses || [])}`"
-        class="flex mb-3"
+        class="flex mb-3 gap-2"
         :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
       >
+        <!-- Avatar (for other user's messages - left side) -->
+        <div v-if="!isOwnMessage(message)" class="flex-shrink-0">
+          <Avatar
+            :avatar="getSenderAvatar(message)"
+            :name="getSenderName(message)"
+            :userId="message.senderId"
+            size="sm"
+            shape="circle"
+          />
+        </div>
+
         <div class="flex flex-col" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
           <!-- Sender Name -->
           <div class="text-xs mb-1 px-1"
@@ -94,6 +105,17 @@
             </button>
           </div>
         </div>
+
+        <!-- Avatar (for own messages - right side) -->
+        <div v-if="isOwnMessage(message)" class="flex-shrink-0">
+          <Avatar
+            :avatar="getSenderAvatar(message)"
+            :name="getSenderName(message)"
+            :userId="message.senderId"
+            size="sm"
+            shape="circle"
+          />
+        </div>
       </div>
 
       <!-- Empty State -->
@@ -125,6 +147,7 @@ import { useMessagesStore } from '@/stores/messages'
 import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
 import UserInfoModal from './UserInfoModal.vue'
+import Avatar from './Avatar.vue'
 import type { Dialog, Message } from '@/types'
 
 const props = defineProps<{
@@ -137,6 +160,7 @@ const messagesContainer = ref<HTMLElement>()
 
 const isUserInfoOpen = ref(false)
 const otherUser = ref<any>(null)
+const userAvatars = ref<Record<string, string | null>>({})
 
 const typingUsersText = computed(() => {
   if (messagesStore.typingUsers.size === 0) return ''
@@ -144,10 +168,31 @@ const typingUsersText = computed(() => {
   return 'печатают...'
 })
 
-// Load other user info on mount
+// Load other user info and current user avatar on mount
 onMounted(async () => {
-  await loadOtherUserInfo()
+  await Promise.all([
+    loadOtherUserInfo(),
+    loadCurrentUserAvatar()
+  ])
 })
+
+async function loadCurrentUserAvatar() {
+  if (!authStore.user?.userId) return
+  
+  try {
+    const response = await api.getMyProfile()
+    if (response.success && response.data) {
+      const avatar = response.data.avatar || null
+      // Always update cache (in case avatar was changed)
+      userAvatars.value[authStore.user.userId] = avatar
+      console.log('✅ Current user avatar loaded:', avatar ? 'has avatar' : 'no avatar')
+    }
+  } catch (error) {
+    // Cache null on error
+    userAvatars.value[authStore.user.userId] = null
+    console.error('Failed to load current user avatar:', error)
+  }
+}
 
 // Scroll to bottom when new messages arrive
 watch(() => messagesStore.messages.length, async () => {
@@ -268,6 +313,71 @@ function getSenderName(message: Message): string {
   return message.senderId
 }
 
+function getSenderAvatar(message: Message): string | null {
+  const isOwn = isOwnMessage(message)
+  
+  // Check cache first
+  if (userAvatars.value[message.senderId] !== undefined) {
+    return userAvatars.value[message.senderId]
+  }
+  
+  // For own messages, try to get current user's avatar
+  if (isOwn) {
+    // Priority 1: Check cache (loaded on mount)
+    if (userAvatars.value[message.senderId] !== undefined) {
+      return userAvatars.value[message.senderId]
+    }
+    
+    // Priority 2: Check if message has sender object with avatar (from Chat3 API)
+    if (message.sender?.avatar) {
+      userAvatars.value[message.senderId] = message.sender.avatar
+      return message.sender.avatar
+    }
+    
+    // Load avatar from API if not in cache
+    loadUserAvatar(message.senderId)
+    
+    return null
+  }
+  
+  // For other user's messages
+  // Priority 1: Check if message has sender object with avatar (from Chat3 API)
+  if (message.sender?.avatar) {
+    userAvatars.value[message.senderId] = message.sender.avatar
+    return message.sender.avatar
+  }
+  
+  // Priority 2: Use otherUser avatar if senderId matches
+  if (message.senderId === otherUser.value?.userId && otherUser.value?.avatar) {
+    userAvatars.value[message.senderId] = otherUser.value.avatar
+    return otherUser.value.avatar
+  }
+  
+  // Load avatar from API if not in cache
+  loadUserAvatar(message.senderId)
+  
+  return null
+}
+
+async function loadUserAvatar(userId: string) {
+  // Skip if already loading or cached
+  if (userAvatars.value[userId] !== undefined) {
+    return
+  }
+  
+  try {
+    const response = await api.getUser(userId)
+    if (response.success && response.data) {
+      const avatar = response.data.avatar || null
+      userAvatars.value[userId] = avatar
+    }
+  } catch (error) {
+    // If user not found or error, cache null
+    userAvatars.value[userId] = null
+    console.error('Failed to load user avatar:', userId, error)
+  }
+}
+
 function formatTime(timestamp: string | number): string {
   // Parse timestamp - can be:
   // 1. Unix timestamp in milliseconds (number or string): 1762419282731 or "1762419282731.615234"
@@ -327,6 +437,11 @@ async function loadOtherUserInfo() {
         const userResponse = await api.getUser(otherMember.userId)
         if (userResponse.success && userResponse.data) {
           otherUser.value = userResponse.data
+          
+          // Cache avatar
+          if (userResponse.data.avatar) {
+            userAvatars.value[otherMember.userId] = userResponse.data.avatar
+          }
         }
       }
     }
