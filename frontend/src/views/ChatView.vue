@@ -511,6 +511,9 @@ function closeCreateGroup() {
 
 async function handleGroupCreated(dialogId: string) {
   try {
+    // Close create group modal
+    closeCreateGroup()
+    
     // Reload dialogs to get the new group
     await dialogsStore.fetchDialogs()
     
@@ -538,6 +541,9 @@ function closeAddMembers() {
 
 async function handleMembersAdded() {
   try {
+    // Close add members modal
+    closeAddMembers()
+    
     // Reload dialogs to update member count
     await dialogsStore.fetchDialogs()
     

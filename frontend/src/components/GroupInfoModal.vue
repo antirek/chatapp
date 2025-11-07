@@ -107,7 +107,13 @@
       </div>
 
       <!-- Actions -->
-      <div class="p-4 border-t border-gray-200 bg-gray-50">
+      <div class="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
+        <button
+          @click="openAddMembers"
+          class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Добавить участников
+        </button>
         <button
           @click="close"
           class="w-full btn-secondary"
@@ -141,6 +147,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  'add-members': []
 }>()
 
 const members = ref<Member[]>([])
@@ -240,6 +247,10 @@ async function loadMore() {
 
 function close() {
   emit('close')
+}
+
+function openAddMembers() {
+  emit('add-members')
 }
 
 function formatPhone(phone: string): string {

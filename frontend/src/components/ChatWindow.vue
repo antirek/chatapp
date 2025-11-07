@@ -145,6 +145,17 @@
       :is-open="isUserInfoOpen"
       :dialog="dialog"
       @close="closeUserInfo"
+      @add-members="handleAddMembers"
+    />
+
+    <!-- Add Group Members Modal -->
+    <AddGroupMembersModal
+      v-if="isGroupChat"
+      :is-open="isAddMembersOpen"
+      :dialog-id="dialog.dialogId"
+      :existing-member-ids="existingMemberIds"
+      @close="closeAddMembers"
+      @members-added="handleMembersAdded"
     />
   </div>
 </template>
@@ -157,6 +168,7 @@ import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
 import UserInfoModal from './UserInfoModal.vue'
 import GroupInfoModal from './GroupInfoModal.vue'
+import AddGroupMembersModal from './AddGroupMembersModal.vue'
 import Avatar from './Avatar.vue'
 import type { Dialog, Message } from '@/types'
 
@@ -169,8 +181,10 @@ const messagesStore = useMessagesStore()
 const messagesContainer = ref<HTMLElement>()
 
 const isUserInfoOpen = ref(false)
+const isAddMembersOpen = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
+const existingMemberIds = ref<string[]>([])
 
 // Check if current dialog is a group chat
 const isGroupChat = computed(() => {
@@ -472,12 +486,53 @@ async function openUserInfo() {
   if (!isGroupChat.value && !otherUser.value) {
     await loadOtherUserInfo()
   }
+  // For group chats, load existing member IDs for AddGroupMembersModal
+  if (isGroupChat.value) {
+    await loadExistingMemberIds()
+  }
   // For group chats, GroupInfoModal will load members itself
   isUserInfoOpen.value = true
 }
 
 function closeUserInfo() {
   isUserInfoOpen.value = false
+}
+
+async function loadExistingMemberIds() {
+  try {
+    const response = await api.getDialogMembers(props.dialog.dialogId)
+    if (response.success && response.data) {
+      existingMemberIds.value = response.data.map((member: any) => member.userId)
+    }
+  } catch (error) {
+    console.error('Failed to load existing member IDs:', error)
+  }
+}
+
+async function handleAddMembers() {
+  // Close GroupInfoModal
+  closeUserInfo()
+  
+  // Load existing member IDs
+  await loadExistingMemberIds()
+  
+  // Open AddGroupMembersModal
+  isAddMembersOpen.value = true
+}
+
+function closeAddMembers() {
+  isAddMembersOpen.value = false
+}
+
+async function handleMembersAdded() {
+  // Close AddGroupMembersModal
+  closeAddMembers()
+  
+  // Reload existing member IDs for next time
+  await loadExistingMemberIds()
+  
+  // Reload messages to get any updates
+  await messagesStore.loadMessages(props.dialog.dialogId)
 }
 </script>
 
