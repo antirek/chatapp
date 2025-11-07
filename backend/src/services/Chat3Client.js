@@ -220,8 +220,13 @@ class Chat3Client {
   /**
    * Get meta for entity
    */
-  async getMeta(entityType, entityId) {
-    const response = await this.client.get(`/meta/${entityType}/${entityId}`);
+  async getMeta(entityType, entityId, key = null) {
+    // Use entityId as-is - Axios will handle URL encoding automatically
+    // For dialogMember, entityId should be in format: dialogId:userId
+    const path = key 
+      ? `/meta/${entityType}/${entityId}/${key}`
+      : `/meta/${entityType}/${entityId}`;
+    const response = await this.client.get(path);
     return response.data;
   }
 
@@ -229,6 +234,8 @@ class Chat3Client {
    * Set meta for entity
    */
   async setMeta(entityType, entityId, key, data) {
+    // Use entityId as-is - Axios will handle URL encoding automatically
+    // For dialogMember, entityId should be in format: dialogId:userId
     const response = await this.client.put(`/meta/${entityType}/${entityId}/${key}`, data);
     return response.data;
   }
@@ -237,6 +244,8 @@ class Chat3Client {
    * Delete meta key
    */
   async deleteMeta(entityType, entityId, key) {
+    // Use entityId as-is - Axios will handle URL encoding automatically
+    // For dialogMember, entityId should be in format: dialogId:userId
     const response = await this.client.delete(`/meta/${entityType}/${entityId}/${key}`);
     return response.data;
   }

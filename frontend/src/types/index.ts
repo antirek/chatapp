@@ -30,6 +30,18 @@ export interface Dialog {
   joinedAt: string | number
   lastInteractionAt: string | number
   lastMessage?: LastMessage
+  chatType?: 'p2p' | 'group'
+  meta?: {
+    type?: 'p2p' | 'group'
+    [key: string]: any
+  }
+  members?: Array<{
+    userId: string
+    name?: string
+    phone?: string
+    avatar?: string | null
+    [key: string]: any
+  }>
 }
 
 export interface LastMessage {

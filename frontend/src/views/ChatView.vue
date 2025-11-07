@@ -83,17 +83,30 @@
       </div>
 
       <!-- Header -->
-      <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-        <h1 class="text-xl font-bold text-gray-900">Чаты</h1>
-        <button
-          @click="openCreateDialog"
-          class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-          title="Создать чат"
-        >
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
+      <div class="p-4 border-b border-gray-200">
+        <div class="flex items-center justify-between mb-2">
+          <h1 class="text-xl font-bold text-gray-900">Чаты</h1>
+          <div class="flex items-center space-x-2">
+            <button
+              @click="openCreateGroup"
+              class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Создать группу"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </button>
+            <button
+              @click="openCreateDialog"
+              class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Создать чат"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Dialogs List -->
@@ -132,6 +145,22 @@
       @close="closeCreateDialog"
       @user-selected="handleUserSelected"
     />
+
+    <!-- Create Group Modal -->
+    <CreateGroupModal
+      :is-open="isCreateGroupOpen"
+      @close="closeCreateGroup"
+      @group-created="handleGroupCreated"
+    />
+
+    <!-- Add Group Members Modal -->
+    <AddGroupMembersModal
+      :is-open="isAddMembersOpen"
+      :dialog-id="currentGroupDialogId"
+      :existing-member-ids="currentGroupMemberIds"
+      @close="closeAddMembers"
+      @members-added="handleMembersAdded"
+    />
   </div>
 </template>
 
@@ -146,6 +175,8 @@ import api from '@/services/api'
 import DialogList from '@/components/DialogList.vue'
 import ChatWindow from '@/components/ChatWindow.vue'
 import CreateDialogModal from '@/components/CreateDialogModal.vue'
+import CreateGroupModal from '@/components/CreateGroupModal.vue'
+import AddGroupMembersModal from '@/components/AddGroupMembersModal.vue'
 import UserProfile from '@/components/UserProfile.vue'
 import Avatar from '@/components/Avatar.vue'
 import { useNotificationSound } from '@/composables/useNotificationSound'
@@ -156,8 +187,12 @@ const dialogsStore = useDialogsStore()
 const messagesStore = useMessagesStore()
 
 const isCreateDialogOpen = ref(false)
+const isCreateGroupOpen = ref(false)
+const isAddMembersOpen = ref(false)
 const isUserProfileOpen = ref(false)
 const currentUserAvatar = ref<string | null>(null)
+const currentGroupDialogId = ref<string | null>(null)
+const currentGroupMemberIds = ref<string[]>([])
 
 // Audio notification system
 const { 
@@ -462,6 +497,56 @@ async function handleUserSelected(user: any) {
     console.error('Failed to create dialog:', error)
     closeCreateDialog()
     alert('Не удалось создать диалог: ' + (error.response?.data?.error || error.message))
+  }
+}
+
+// Create Group Modal functions
+function openCreateGroup() {
+  isCreateGroupOpen.value = true
+}
+
+function closeCreateGroup() {
+  isCreateGroupOpen.value = false
+}
+
+async function handleGroupCreated(dialogId: string) {
+  try {
+    // Reload dialogs to get the new group
+    await dialogsStore.fetchDialogs()
+    
+    // Get dialog members to exclude them from add members modal
+    const dialogResponse = await api.getDialogMembers(dialogId)
+    if (dialogResponse.success && dialogResponse.data) {
+      currentGroupMemberIds.value = dialogResponse.data.map((member: any) => member.userId)
+    }
+    
+    // Open add members modal
+    currentGroupDialogId.value = dialogId
+    isAddMembersOpen.value = true
+  } catch (error: any) {
+    console.error('Failed to open add members modal:', error)
+    alert('Группа создана, но не удалось открыть окно добавления участников')
+  }
+}
+
+// Add Group Members Modal functions
+function closeAddMembers() {
+  isAddMembersOpen.value = false
+  currentGroupDialogId.value = null
+  currentGroupMemberIds.value = []
+}
+
+async function handleMembersAdded() {
+  try {
+    // Reload dialogs to update member count
+    await dialogsStore.fetchDialogs()
+    
+    // If current dialog is the group, reload it
+    if (currentGroupDialogId.value && dialogsStore.currentDialog?.dialogId === currentGroupDialogId.value) {
+      await selectDialog(currentGroupDialogId.value)
+    }
+  } catch (error: any) {
+    console.error('Failed to reload dialogs after adding members:', error)
   }
 }
 </script>

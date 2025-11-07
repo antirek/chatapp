@@ -14,15 +14,16 @@ router.use(authenticate);
 router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 10, includeLastMessage = false } = req.query;
+    const currentUserId = req.user.userId;
     
-    const result = await Chat3Client.getUserDialogs(req.user.userId, {
+    const result = await Chat3Client.getUserDialogs(currentUserId, {
       page,
       limit,
       includeLastMessage,
     });
 
     // Extract context fields to top level for easier frontend access
-    const dialogsWithContext = result.data.map(dialog => ({
+    let dialogsWithContext = result.data.map(dialog => ({
       ...dialog,
       unreadCount: dialog.context?.unreadCount || 0,
       lastSeenAt: dialog.context?.lastSeenAt,
@@ -31,9 +32,90 @@ router.get('/', async (req, res) => {
       joinedAt: dialog.context?.joinedAt,
     }));
 
+    // Process P2P dialogs: replace name and avatar with interlocutor's data
+    const processedDialogs = await Promise.all(
+      dialogsWithContext.map(async (dialog) => {
+        // Check if dialog is P2P type
+        const dialogType = dialog.meta?.type || dialog.type;
+        
+        if (dialogType === 'p2p') {
+          try {
+            // Find interlocutor (all members except current user)
+            // Members might be in dialog.members or we need to get full dialog info
+            let members = dialog.members || [];
+            
+            // If members not in dialog, get full dialog info
+            if (members.length === 0) {
+              try {
+                const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
+                members = (fullDialog.data || fullDialog).members || [];
+              } catch (error) {
+                console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
+              }
+            }
+            
+            const interlocutor = members.find(
+              member => member.userId !== currentUserId
+            );
+
+            if (interlocutor && interlocutor.userId) {
+              try {
+                // Get interlocutor's data from Chat3 API
+                const interlocutorData = await Chat3Client.getUser(interlocutor.userId);
+                // Chat3Client.getUser returns response.data, which may contain nested data
+                const interlocutorUser = interlocutorData.data || interlocutorData;
+                
+                // Extract name and avatar
+                const interlocutorName = interlocutorUser.name || interlocutor.userId;
+                // Avatar might be in meta.avatar or directly in avatar field
+                const interlocutorAvatar = interlocutorUser.meta?.avatar?.value || 
+                                         interlocutorUser.meta?.avatar || 
+                                         interlocutorUser.avatar || 
+                                         null;
+
+                // Replace dialog name and avatar with interlocutor's data
+                return {
+                  ...dialog,
+                  name: interlocutorName,
+                  avatar: interlocutorAvatar,
+                  chatType: 'p2p', // Explicitly set chat type
+                };
+              } catch (error) {
+                // If failed to get interlocutor data, log and return dialog as is
+                console.warn(`Failed to get interlocutor data for dialog ${dialog.dialogId}:`, error.message);
+                return {
+                  ...dialog,
+                  chatType: 'p2p',
+                };
+              }
+            } else {
+              // No interlocutor found, return dialog as is
+              console.warn(`No interlocutor found for P2P dialog ${dialog.dialogId}`);
+              return {
+                ...dialog,
+                chatType: 'p2p',
+              };
+            }
+          } catch (error) {
+            console.warn(`Error processing P2P dialog ${dialog.dialogId}:`, error.message);
+            return {
+              ...dialog,
+              chatType: 'p2p',
+            };
+          }
+        }
+
+        // For non-P2P dialogs, return as is
+        return {
+          ...dialog,
+          chatType: dialogType || 'group',
+        };
+      })
+    );
+
     res.json({
       success: true,
-      data: dialogsWithContext,
+      data: processedDialogs,
       pagination: result.pagination,
     });
   } catch (error) {
@@ -47,11 +129,11 @@ router.get('/', async (req, res) => {
 /**
  * POST /api/dialogs
  * Create new dialog
- * Body: { name: "Dialog name", memberIds: ["userId1", "userId2"] }
+ * Body: { name: "Dialog name", memberIds: ["userId1", "userId2"], chatType?: "p2p" | "group" }
  */
 router.post('/', async (req, res) => {
   try {
-    const { name, memberIds = [] } = req.body;
+    const { name, memberIds = [], chatType } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -72,9 +154,32 @@ router.post('/', async (req, res) => {
     // Add creator as member
     await Chat3Client.addDialogMember(dialogId, req.user.userId);
 
+    // Set role: owner for creator (only for group chats)
+    const totalMembers = 1 + memberIds.length; // creator + other members
+    const finalChatType = chatType || (totalMembers === 2 ? 'p2p' : 'group');
+    
+    if (finalChatType === 'group') {
+      try {
+        // Set role: owner for creator in dialogMember meta
+        // Format: /meta/dialogMember/{dialogId}:{userId}/role
+        const metaResult = await Chat3Client.setMeta('dialogMember', `${dialogId}:${req.user.userId}`, 'role', { value: 'owner' });
+        console.log(`✅ Set role: owner for creator ${req.user.userId} in dialog ${dialogId}:`, metaResult);
+      } catch (error) {
+        console.error(`❌ Failed to set role meta tag for creator in dialog ${dialogId}:`, error.message);
+        console.error('Error details:', error.response?.data || error);
+      }
+    }
+
     // Add other members
     for (const memberId of memberIds) {
       await Chat3Client.addDialogMember(dialogId, memberId);
+    }
+
+    // Set chat type meta tag
+    try {
+      await Chat3Client.setMeta('dialog', dialogId, 'type', { value: finalChatType });
+    } catch (error) {
+      console.warn(`Failed to set chat type meta tag for dialog ${dialogId}:`, error.message);
     }
 
     // Fetch full dialog data with transformed structure
@@ -144,7 +249,7 @@ router.delete('/:dialogId', async (req, res) => {
 
 /**
  * GET /api/dialogs/:dialogId/members
- * Get dialog members
+ * Get dialog members with their roles
  */
 router.get('/:dialogId/members', async (req, res) => {
   try {
@@ -154,9 +259,108 @@ router.get('/:dialogId/members', async (req, res) => {
     // Get members info
     const members = dialog.data.members || [];
     
+    // Get role for each member from meta tags
+    const membersWithRoles = await Promise.all(
+      members.map(async (member) => {
+        try {
+          // Get role meta tag for this dialogMember
+          // Format: /meta/dialogMember/{dialogId}:{userId}/role
+          // Try different possible entityId formats
+          const entityIdFormats = [
+            `${dialogId}:${member.userId}`,  // Format 1: dialogId:userId (correct format)
+            `${dialogId}/${member.userId}`,  // Format 2: dialogId/userId (fallback)
+            `${dialogId}_${member.userId}`,  // Format 3: dialogId_userId (fallback)
+            member.userId,                    // Format 4: just userId (fallback)
+          ];
+          
+          let role = null;
+          let roleMeta = null;
+          
+          // Try each format until we find the role
+          for (const entityId of entityIdFormats) {
+            try {
+              // First try to get specific 'role' key
+              try {
+                roleMeta = await Chat3Client.getMeta('dialogMember', entityId, 'role');
+                console.log(`🔍 Getting role key for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, roleMeta);
+                
+                // Extract role from response
+                role = roleMeta?.value || roleMeta?.data?.value || roleMeta?.data || roleMeta || null;
+                
+                if (role) {
+                  console.log(`✅ Found role for member ${member.userId} using entityId format: ${entityId}, role:`, role);
+                  break; // Found role, stop trying other formats
+                }
+              } catch (keyError) {
+                // If specific key not found, try getting all meta tags
+                try {
+                  roleMeta = await Chat3Client.getMeta('dialogMember', entityId);
+                  
+                  // Log for debugging
+                  console.log(`🔍 Getting all meta for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, {
+                    entityId,
+                    roleMeta,
+                    roleMetaType: typeof roleMeta,
+                    roleMetaKeys: roleMeta ? Object.keys(roleMeta) : null
+                  });
+                  
+                  // Try different formats for role extraction
+                  if (roleMeta) {
+                    // Try different possible formats
+                    role = roleMeta?.role?.value || 
+                           roleMeta?.role || 
+                           roleMeta?.data?.role?.value || 
+                           roleMeta?.data?.role ||
+                           (roleMeta?.data && typeof roleMeta.data === 'object' && 'role' in roleMeta.data ? roleMeta.data.role : null) ||
+                           null;
+                    
+                    if (role) {
+                      console.log(`✅ Found role for member ${member.userId} using entityId format: ${entityId}, role:`, role);
+                      break; // Found role, stop trying other formats
+                    }
+                  }
+                } catch (allMetaError) {
+                  // Try next format
+                  if (allMetaError.response?.status !== 404) {
+                    console.warn(`⚠️ Error getting meta for member ${member.userId} with entityId ${entityId}:`, allMetaError.message);
+                  }
+                  continue;
+                }
+              }
+            } catch (error) {
+              // Try next format
+              if (error.response?.status !== 404) {
+                console.warn(`⚠️ Error getting role for member ${member.userId} with entityId ${entityId}:`, error.message);
+              }
+              continue;
+            }
+          }
+          
+          if (!role) {
+            console.log(`⚠️ No role found for member ${member.userId} in dialog ${dialogId}`);
+          }
+          
+          return {
+            ...member,
+            role: role || null,
+          };
+        } catch (error) {
+          // If meta not found or error, member has no role
+          console.warn(`⚠️ Failed to get role for member ${member.userId} in dialog ${dialogId}:`, error.message);
+          if (error.response?.status !== 404) {
+            console.error('Error details:', error.response?.data || error);
+          }
+          return {
+            ...member,
+            role: null,
+          };
+        }
+      })
+    );
+    
     res.json({
       success: true,
-      data: members,
+      data: membersWithRoles,
     });
   } catch (error) {
     res.status(500).json({

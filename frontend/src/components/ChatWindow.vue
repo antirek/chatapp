@@ -131,10 +131,19 @@
     <!-- Message Input -->
     <MessageInput @send="handleSendMessage" />
 
-    <!-- User Info Modal -->
+    <!-- User Info Modal (for P2P chats) -->
     <UserInfoModal
+      v-if="!isGroupChat"
       :is-open="isUserInfoOpen"
       :user="otherUser"
+      @close="closeUserInfo"
+    />
+
+    <!-- Group Info Modal (for group chats) -->
+    <GroupInfoModal
+      v-if="isGroupChat"
+      :is-open="isUserInfoOpen"
+      :dialog="dialog"
       @close="closeUserInfo"
     />
   </div>
@@ -147,6 +156,7 @@ import { useMessagesStore } from '@/stores/messages'
 import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
 import UserInfoModal from './UserInfoModal.vue'
+import GroupInfoModal from './GroupInfoModal.vue'
 import Avatar from './Avatar.vue'
 import type { Dialog, Message } from '@/types'
 
@@ -162,6 +172,12 @@ const isUserInfoOpen = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
 
+// Check if current dialog is a group chat
+const isGroupChat = computed(() => {
+  const chatType = props.dialog.chatType || props.dialog.meta?.type
+  return chatType === 'group'
+})
+
 const typingUsersText = computed(() => {
   if (messagesStore.typingUsers.size === 0) return ''
   if (messagesStore.typingUsers.size === 1) return 'печатает...'
@@ -171,7 +187,8 @@ const typingUsersText = computed(() => {
 // Load other user info and current user avatar on mount
 onMounted(async () => {
   await Promise.all([
-    loadOtherUserInfo(),
+    // Only load other user info for P2P chats
+    isGroupChat.value ? Promise.resolve() : loadOtherUserInfo(),
     loadCurrentUserAvatar()
   ])
 })
@@ -451,10 +468,11 @@ async function loadOtherUserInfo() {
 }
 
 async function openUserInfo() {
-  // Load fresh user info
-  if (!otherUser.value) {
+  // For P2P chats, load fresh user info if needed
+  if (!isGroupChat.value && !otherUser.value) {
     await loadOtherUserInfo()
   }
+  // For group chats, GroupInfoModal will load members itself
   isUserInfoOpen.value = true
 }
 

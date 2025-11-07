@@ -76,6 +76,7 @@ class ApiService {
   async createDialog(dialogData: {
     name: string
     memberIds?: string[]
+    chatType?: 'p2p' | 'group'
   }): Promise<ApiResponse<Dialog>> {
     const { data } = await this.api.post('/dialogs', dialogData)
     return data

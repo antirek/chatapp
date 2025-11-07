@@ -35,6 +35,7 @@
             :avatar="getDialogAvatar(dialog)"
             :name="dialog.name || dialog.dialogName || 'Диалог'"
             :userId="getDialogOtherUserId(dialog)"
+            :is-group="isGroupChat(dialog)"
             size="md"
             shape="circle"
           />
@@ -127,6 +128,11 @@ function getDialogOtherUserId(dialog: Dialog): string {
 }
 
 function getDialogAvatar(dialog: Dialog): string | null {
+  // For group chats, return null to show default group icon
+  if (isGroupChat(dialog)) {
+    return null
+  }
+  
   const otherUserId = getDialogOtherUserId(dialog)
   if (!otherUserId) return null
   
@@ -139,6 +145,11 @@ function getDialogAvatar(dialog: Dialog): string | null {
   loadUserAvatar(otherUserId)
   
   return null
+}
+
+function isGroupChat(dialog: Dialog): boolean {
+  const chatType = dialog.chatType || dialog.meta?.type
+  return chatType === 'group'
 }
 
 async function loadDialogOtherUser(dialogId: string) {

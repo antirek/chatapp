@@ -34,10 +34,39 @@ router.get('/', authenticate, async (req, res) => {
       .limit(parseInt(limit))
       .sort({ lastActiveAt: -1, createdAt: -1 });
 
+    // Get avatars from Chat3 API for each user
+    const usersWithAvatars = await Promise.all(
+      users.map(async (user) => {
+        let avatar = null;
+        try {
+          const chat3User = await Chat3Client.getUser(user.userId);
+          const chat3UserData = chat3User.data || chat3User;
+          avatar = chat3UserData.meta?.avatar?.value || 
+                   chat3UserData.meta?.avatar || 
+                   chat3UserData.avatar || 
+                   null;
+        } catch (error) {
+          // If user not found in Chat3, avatar remains null
+          if (error.response?.status !== 404) {
+            console.warn(`Failed to get avatar for user ${user.userId}:`, error.message);
+          }
+        }
+        
+        return {
+          userId: user.userId,
+          name: user.name,
+          phone: user.phone,
+          avatar,
+          createdAt: user.createdAt,
+          lastActiveAt: user.lastActiveAt,
+        };
+      })
+    );
+
     res.json({
       success: true,
-      data: users,
-      total: users.length
+      data: usersWithAvatars,
+      total: usersWithAvatars.length
     });
   } catch (error) {
     console.error('Error fetching users:', error);
