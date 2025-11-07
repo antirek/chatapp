@@ -178,9 +178,17 @@ function setupWebSocketListeners() {
   websocket.on('connected', handleReconnect)
 }
 
-function handleReconnect() {
+async function handleReconnect() {
   // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
-  console.log('🔄 WebSocket reconnected, updates will come through RabbitMQ')
+  console.log('🔄 WebSocket reconnected, reloading dialogs...')
+  
+  // Reload dialogs after reconnect to get any updates we missed
+  try {
+    await dialogsStore.fetchDialogs()
+    console.log('✅ Dialogs reloaded after reconnect')
+  } catch (error) {
+    console.error('❌ Failed to reload dialogs after reconnect:', error)
+  }
 }
 
 function handleChat3Update(update: any) {
@@ -223,6 +231,15 @@ function handleNewMessage(message: any) {
   // Check if message is from another user
   const isFromOtherUser = message.senderId !== authStore.user?.userId
   
+  console.log('📩 handleNewMessage:', {
+    messageDialogId,
+    currentDialogId,
+    senderId: message.senderId,
+    currentUserId: authStore.user?.userId,
+    isFromOtherUser,
+    isCurrentDialog: messageDialogId === currentDialogId
+  })
+  
   // Play notification sound for messages from other users
   if (isFromOtherUser) {
     playNotificationSound()
@@ -231,15 +248,14 @@ function handleNewMessage(message: any) {
   // Add to messages store if in current dialog
   if (messageDialogId === currentDialogId) {
     messagesStore.addMessage(message)
+  } else if (isFromOtherUser) {
+    // Increment unread count if message is from another user and not in current dialog
+    console.log('🔢 Incrementing unread count for dialog:', messageDialogId)
+    dialogsStore.incrementUnreadCount(messageDialogId)
   }
 
   // Update dialog last message
   dialogsStore.updateLastMessage(messageDialogId, message)
-
-  // Increment unread count if not current dialog
-  if (messageDialogId !== currentDialogId) {
-    dialogsStore.incrementUnreadCount(messageDialogId)
-  }
 }
 
 async function handleMessageUpdate(update: any) {
@@ -257,6 +273,17 @@ async function handleMessageUpdate(update: any) {
           if (response.success && response.data) {
             console.log('✅ Got full message with statuses:', response.data.statuses)
             messagesStore.updateMessage(messageId, response.data)
+            
+            // Decrement unread count if current user marked message as read
+            if (update.data.userId === authStore.user?.userId && update.data.status === 'read' && response.data.dialogId) {
+              // Check if it's not the current dialog (already at 0 unread)
+              if (response.data.dialogId !== dialogsStore.currentDialog?.dialogId) {
+                const dialog = dialogsStore.dialogs.find(d => d.dialogId === response.data.dialogId)
+                if (dialog && dialog.unreadCount > 0) {
+                  dialogsStore.updateDialogUnreadCount(response.data.dialogId, dialog.unreadCount - 1)
+                }
+              }
+            }
           }
         } catch (error) {
           console.error('Failed to fetch message for status update:', error)
@@ -294,6 +321,33 @@ async function selectDialog(dialogId: string) {
     
     // Load messages
     await messagesStore.fetchMessages(dialogId)
+    
+    // Auto-mark unread messages as read after opening dialog
+    const currentUserId = authStore.user?.userId
+    if (currentUserId) {
+      // Find unread messages from other users
+      const unreadMessages = messagesStore.messages.filter(msg => {
+        // Skip own messages
+        if (msg.senderId === currentUserId) return false
+        
+        // Check if current user hasn't read this message
+        if (!msg.statuses || !Array.isArray(msg.statuses)) return false
+        
+        const userStatus = msg.statuses.find((s: any) => s.userId === currentUserId)
+        return !userStatus || userStatus.status !== 'read'
+      })
+      
+      // Mark all unread messages as read
+      for (const msg of unreadMessages) {
+        const messageId = msg.messageId || msg._id
+        if (messageId) {
+          // Don't await - mark in background
+          messagesStore.markAsRead(messageId).catch(err => {
+            console.error('Failed to auto-mark message as read:', messageId, err)
+          })
+        }
+      }
+    }
   }
 }
 

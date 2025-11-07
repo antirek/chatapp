@@ -21,9 +21,20 @@ router.get('/', async (req, res) => {
       includeLastMessage,
     });
 
+    // Extract context fields to top level for easier frontend access
+    const dialogsWithContext = result.data.map(dialog => ({
+      ...dialog,
+      unreadCount: dialog.context?.unreadCount || 0,
+      lastSeenAt: dialog.context?.lastSeenAt,
+      lastMessageAt: dialog.context?.lastMessageAt,
+      isActive: dialog.context?.isActive || false,
+      joinedAt: dialog.context?.joinedAt,
+    }));
+
     res.json({
       success: true,
-      ...result,
+      data: dialogsWithContext,
+      pagination: result.pagination,
     });
   } catch (error) {
     res.status(500).json({

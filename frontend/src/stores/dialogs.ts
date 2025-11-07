@@ -13,25 +13,47 @@ export const useDialogsStore = defineStore('dialogs', () => {
     page?: number
     limit?: number
     includeLastMessage?: boolean
+    retries?: number
   }) {
     isLoading.value = true
     error.value = null
 
-    try {
-      const response = await api.getDialogs({
-        page: params?.page || 1,
-        limit: params?.limit || 50,
-        includeLastMessage: params?.includeLastMessage ?? true
-      })
+    const maxRetries = params?.retries ?? 3
+    let lastError: any = null
 
-      dialogs.value = response.data
-      return response
-    } catch (err: any) {
-      error.value = err.response?.data?.error || err.message
-      throw err
-    } finally {
-      isLoading.value = false
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await api.getDialogs({
+          page: params?.page || 1,
+          limit: params?.limit || 50,
+          includeLastMessage: params?.includeLastMessage ?? true
+        })
+
+        dialogs.value = response.data
+        error.value = null // Clear error on success
+        isLoading.value = false // Clear loading state on success
+        return response
+      } catch (err: any) {
+        lastError = err
+        const isNetworkError = err.code === 'ERR_NETWORK' || err.code === 'ECONNREFUSED'
+        
+        // Retry only on network errors and if we have retries left
+        if (isNetworkError && attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000) // Exponential backoff: 1s, 2s, 4s, max 5s
+          console.log(`⏳ Failed to load dialogs (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        
+        // Don't retry on auth errors or after max retries
+        break
+      }
     }
+
+    // If we got here, all retries failed
+    error.value = lastError?.response?.data?.error || lastError?.message || 'Failed to load dialogs'
+    isLoading.value = false
+    throw lastError
   }
 
   async function createDialog(name: string, memberIds?: string[]) {
@@ -61,8 +83,8 @@ export const useDialogsStore = defineStore('dialogs', () => {
     if (dialog) {
       currentDialog.value = dialog
       
-      // Reset unread count
-      dialog.unreadCount = 0
+      // Don't reset unread count here - it should only be reset when messages are actually read
+      // The unread count will be updated by WebSocket when user reads messages
     } else {
       // Fetch dialog if not in list
       try {
