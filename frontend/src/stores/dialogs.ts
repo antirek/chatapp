@@ -63,9 +63,20 @@ export const useDialogsStore = defineStore('dialogs', () => {
     try {
       const response = await api.createDialog({ name, memberIds })
       
-      // Add to list
+      // Check if dialog already exists in list (for P2P dialogs that already exist)
       if (response.data) {
-        dialogs.value.unshift(response.data as Dialog)
+        const dialogId = response.data.dialogId
+        const existingIndex = dialogs.value.findIndex(d => d.dialogId === dialogId)
+        
+        if (existingIndex !== -1) {
+          // Dialog already exists - update it instead of adding duplicate
+          dialogs.value[existingIndex] = response.data as Dialog
+          console.log(`✅ Updated existing dialog ${dialogId} in list`)
+        } else {
+          // New dialog - add to list
+          dialogs.value.unshift(response.data as Dialog)
+          console.log(`✅ Added new dialog ${dialogId} to list`)
+        }
       }
 
       return response
