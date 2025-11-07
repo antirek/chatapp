@@ -56,19 +56,36 @@
           
           <!-- Message Bubble -->
           <div
-            class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg"
-            :class="isOwnMessage(message)
-              ? 'bg-primary-600 text-white rounded-br-none'
-              : 'bg-white text-gray-900 rounded-bl-none shadow-sm border border-gray-200'
-            "
+            class="max-w-xs lg:max-w-md rounded-lg"
+            :class="getMessageBubbleClasses(message)"
           >
             <!-- Message Content -->
-            <div class="break-words">{{ message.content }}</div>
+            <template v-if="isImageMessage(message)">
+              <a
+                :href="getImageUrl(message)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block"
+              >
+                <img
+                  :src="getImageUrl(message)"
+                  :alt="getImageAlt(message)"
+                  class="rounded-md max-h-64 w-full object-cover bg-gray-100"
+                  loading="lazy"
+                />
+              </a>
+              <p v-if="message.meta?.originalName" class="text-xs mt-2 text-gray-500 break-all">
+                {{ message.meta.originalName }}
+              </p>
+            </template>
+            <template v-else>
+              <div class="break-words">{{ message.content }}</div>
+            </template>
 
             <!-- Message Time with Read Status -->
             <div
               class="text-xs mt-1 flex items-center gap-1"
-              :class="isOwnMessage(message) ? 'text-primary-100' : 'text-gray-400'"
+              :class="getTimestampClasses(message)"
             >
               <span>{{ formatTime(message.createdAt) }}</span>
               
@@ -129,7 +146,7 @@
     </div>
 
     <!-- Message Input -->
-    <MessageInput @send="handleSendMessage" />
+    <MessageInput @send="handleSendMessage" @send-image="handleSendImage" />
 
     <!-- User Info Modal (for P2P chats) -->
     <UserInfoModal
@@ -175,6 +192,13 @@ import type { Dialog, Message } from '@/types'
 const props = defineProps<{
   dialog: Dialog
 }>()
+
+interface ImageMessagePayload {
+  url: string
+  fileId?: string | null
+  originalName: string
+  mimeType: string
+}
 
 const authStore = useAuthStore()
 const messagesStore = useMessagesStore()
@@ -241,6 +265,49 @@ function isOwnMessage(message: Message): boolean {
   const result = message.senderId === authStore.user?.userId
   console.log('isOwnMessage:', message.senderId, '===', authStore.user?.userId, '=', result)
   return result
+}
+
+function isImageMessage(message: Message): boolean {
+  const type = (message.type || message.meta?.type || '').toLowerCase()
+  return type === 'image'
+}
+
+function getImageUrl(message: Message): string {
+  if (message.meta?.url && typeof message.meta.url === 'string') {
+    return message.meta.url
+  }
+  if (typeof message.content === 'string') {
+    return message.content
+  }
+  return ''
+}
+
+function getImageAlt(message: Message): string {
+  if (message.meta?.originalName) {
+    return message.meta.originalName
+  }
+  return 'Изображение'
+}
+
+function getMessageBubbleClasses(message: Message): string {
+  if (isImageMessage(message)) {
+    const base = ['p-2', 'bg-white', 'text-gray-900', 'border', 'border-gray-200']
+    base.push(isOwnMessage(message) ? 'rounded-br-none' : 'rounded-bl-none')
+    return base.join(' ')
+  }
+
+  if (isOwnMessage(message)) {
+    return 'px-4 py-2 bg-primary-600 text-white rounded-br-none'
+  }
+
+  return 'px-4 py-2 bg-white text-gray-900 rounded-bl-none shadow-sm border border-gray-200'
+}
+
+function getTimestampClasses(message: Message): string {
+  if (isOwnMessage(message)) {
+    return isImageMessage(message) ? 'text-gray-500' : 'text-primary-100'
+  }
+  return 'text-gray-400'
 }
 
 function isMessageRead(message: Message): boolean {
@@ -437,6 +504,25 @@ async function handleSendMessage(content: string) {
     })
   } catch (error) {
     console.error('Failed to send message:', error)
+  }
+}
+
+async function handleSendImage(payload: ImageMessagePayload) {
+  if (!props.dialog) return
+
+  try {
+    await messagesStore.sendMessage(props.dialog.dialogId, {
+      content: payload.url,
+      type: 'image',
+      meta: {
+        url: payload.url,
+        fileId: payload.fileId,
+        originalName: payload.originalName,
+        mimeType: payload.mimeType
+      }
+    })
+  } catch (error) {
+    console.error('Failed to send image message:', error)
   }
 }
 
