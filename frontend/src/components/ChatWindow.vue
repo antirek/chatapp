@@ -40,7 +40,7 @@
           <div class="text-xs mb-1 px-1"
             :class="isOwnMessage(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
           >
-            {{ isOwnMessage(message) ? 'Вы' : getSenderName(message.senderId) }}
+            {{ getSenderName(message) }}{{ isOwnMessage(message) ? ' (Вы)' : '' }}
           </div>
           
           <!-- Message Bubble -->
@@ -234,10 +234,38 @@ async function markMessageAsRead(message: Message) {
   }
 }
 
-function getSenderName(senderId: string): string {
-  // TODO: Можно добавить кеш имен пользователей
-  // Пока показываем userId
-  return senderId
+function getSenderName(message: Message): string {
+  const isOwn = isOwnMessage(message)
+  
+  // For own messages, try to get current user's name
+  if (isOwn) {
+    // Priority 1: Check if message has sender object with name (from Chat3 API)
+    if (message.sender?.name) {
+      return message.sender.name
+    }
+    
+    // Priority 2: Use current user's name from authStore
+    if (authStore.user?.name) {
+      return authStore.user.name
+    }
+    
+    // Fallback: Show senderId
+    return message.senderId
+  }
+  
+  // For other user's messages
+  // Priority 1: Check if message has sender object with name (from Chat3 API)
+  if (message.sender?.name) {
+    return message.sender.name
+  }
+  
+  // Priority 2: Use otherUser name if senderId matches (loaded from dialog members)
+  if (message.senderId === otherUser.value?.userId && otherUser.value?.name) {
+    return otherUser.value.name
+  }
+  
+  // Fallback: Show senderId if name is not available
+  return message.senderId
 }
 
 function formatTime(timestamp: string | number): string {

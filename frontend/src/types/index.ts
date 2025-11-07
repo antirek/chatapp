@@ -46,6 +46,12 @@ export interface Message {
   tenantId?: string
   dialogId: string
   senderId: string
+  sender?: {
+    userId: string
+    name?: string
+    phone?: string
+    [key: string]: any
+  }
   content: string
   type: string
   reactionCounts?: Record<string, number>
