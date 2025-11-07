@@ -385,6 +385,21 @@ router.post('/:dialogId/join', async (req, res) => {
     // Add user to group
     await Chat3Client.addDialogMember(dialogId, currentUserId);
 
+    // Get user info for system notification
+    try {
+      const userResponse = await Chat3Client.getUser(currentUserId);
+      const userName = userResponse?.data?.name || currentUserId;
+      
+      // Send system notification message
+      await Chat3Client.createMessage(dialogId, {
+        content: `Пользователь ${userName} вошел в группу`,
+        senderId: 'system',
+        type: 'system',
+      });
+    } catch (error) {
+      console.warn(`Failed to send system notification for user ${currentUserId}:`, error.message);
+    }
+
     // Get updated dialog
     const updatedDialog = await Chat3Client.getDialog(dialogId);
 
@@ -585,6 +600,21 @@ router.post('/:dialogId/members', async (req, res) => {
 
     await Chat3Client.addDialogMember(dialogId, userId);
 
+    // Get user info for system notification
+    try {
+      const userResponse = await Chat3Client.getUser(userId);
+      const userName = userResponse?.data?.name || userId;
+      
+      // Send system notification message
+      await Chat3Client.createMessage(dialogId, {
+        content: `Пользователь ${userName} вошел в группу`,
+        senderId: 'system',
+        type: 'system',
+      });
+    } catch (error) {
+      console.warn(`Failed to send system notification for user ${userId}:`, error.message);
+    }
+
     res.json({
       success: true,
       message: 'Member added',
@@ -604,7 +634,28 @@ router.post('/:dialogId/members', async (req, res) => {
 router.delete('/:dialogId/members/:userId', async (req, res) => {
   try {
     const { dialogId, userId } = req.params;
+    
+    // Get user info for system notification before removing
+    let userName = userId;
+    try {
+      const userResponse = await Chat3Client.getUser(userId);
+      userName = userResponse?.data?.name || userId;
+    } catch (error) {
+      console.warn(`Failed to get user info for ${userId}:`, error.message);
+    }
+
     await Chat3Client.removeDialogMember(dialogId, userId);
+
+    // Send system notification message
+    try {
+      await Chat3Client.createMessage(dialogId, {
+        content: `Пользователь ${userName} вышел из группы`,
+        senderId: 'system',
+        type: 'system',
+      });
+    } catch (error) {
+      console.warn(`Failed to send system notification for user ${userId}:`, error.message);
+    }
 
     res.json({
       success: true,

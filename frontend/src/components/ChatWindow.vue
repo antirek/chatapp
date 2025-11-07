@@ -32,27 +32,41 @@
       <div
         v-for="message in messagesStore.sortedMessages"
         :key="`${message.messageId || message._id}-${JSON.stringify(message.statuses || [])}`"
-        class="flex mb-3 gap-2"
-        :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
       >
-        <!-- Avatar (for other user's messages - left side) -->
-        <div v-if="!isOwnMessage(message)" class="flex-shrink-0">
-          <Avatar
-            :avatar="getSenderAvatar(message)"
-            :name="getSenderName(message)"
-            :userId="message.senderId"
-            size="sm"
-            shape="circle"
-          />
+        <!-- System Notification Message -->
+        <div
+          v-if="isSystemNotification(message)"
+          class="flex justify-center mb-3"
+        >
+          <div class="text-xs text-gray-400 italic px-4 py-2">
+            {{ message.content }}
+          </div>
         </div>
 
-        <div class="flex flex-col" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
-          <!-- Sender Name -->
-          <div class="text-xs mb-1 px-1"
-            :class="isOwnMessage(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
-          >
-            {{ getSenderName(message) }}{{ isOwnMessage(message) ? ' (Вы)' : '' }}
+        <!-- Regular Message -->
+        <div
+          v-else
+          class="flex mb-3 gap-2"
+          :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
+        >
+          <!-- Avatar (for other user's messages - left side) -->
+          <div v-if="!isOwnMessage(message)" class="flex-shrink-0">
+            <Avatar
+              :avatar="getSenderAvatar(message)"
+              :name="getSenderName(message)"
+              :userId="message.senderId"
+              size="sm"
+              shape="circle"
+            />
           </div>
+
+          <div class="flex flex-col" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
+            <!-- Sender Name -->
+            <div class="text-xs mb-1 px-1"
+              :class="isOwnMessage(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
+            >
+              {{ getSenderName(message) }}{{ isOwnMessage(message) ? ' (Вы)' : '' }}
+            </div>
           
           <!-- Message Bubble -->
           <div
@@ -123,15 +137,16 @@
           </div>
         </div>
 
-        <!-- Avatar (for own messages - right side) -->
-        <div v-if="isOwnMessage(message)" class="flex-shrink-0">
-          <Avatar
-            :avatar="getSenderAvatar(message)"
-            :name="getSenderName(message)"
-            :userId="message.senderId"
-            size="sm"
-            shape="circle"
-          />
+          <!-- Avatar (for own messages - right side) -->
+          <div v-if="isOwnMessage(message)" class="flex-shrink-0">
+            <Avatar
+              :avatar="getSenderAvatar(message)"
+              :name="getSenderName(message)"
+              :userId="message.senderId"
+              size="sm"
+              shape="circle"
+            />
+          </div>
         </div>
       </div>
 
@@ -270,6 +285,10 @@ function isOwnMessage(message: Message): boolean {
   const result = message.senderId === authStore.user?.userId
   console.log('isOwnMessage:', message.senderId, '===', authStore.user?.userId, '=', result)
   return result
+}
+
+function isSystemNotification(message: Message): boolean {
+  return message.type === 'system'
 }
 
 function isImageMessage(message: Message): boolean {
