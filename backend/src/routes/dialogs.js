@@ -142,6 +142,76 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Determine chat type
+    const totalMembers = 1 + memberIds.length; // creator + other members
+    const finalChatType = chatType || (totalMembers === 2 ? 'p2p' : 'group');
+
+    // For P2P dialogs, check if dialog already exists between these two users
+    if (finalChatType === 'p2p' && memberIds.length === 1) {
+      const otherUserId = memberIds[0];
+      const currentUserId = req.user.userId;
+
+      console.log(`🔍 Checking for existing P2P dialog between ${currentUserId} and ${otherUserId}`);
+
+      // Get all user dialogs with pagination
+      let userPage = 1;
+      let hasMoreDialogs = true;
+      let existingDialog = null;
+
+      while (hasMoreDialogs && !existingDialog) {
+        const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
+          page: userPage,
+          limit: 100, // Max allowed by Chat3 API
+        });
+
+        if (!userDialogs.data || userDialogs.data.length === 0) {
+          hasMoreDialogs = false;
+          break;
+        }
+
+        // Find existing P2P dialog with the other user
+        for (const dialog of userDialogs.data) {
+          const dialogType = dialog.meta?.type || dialog.type;
+          
+          if (dialogType === 'p2p') {
+            // Get full dialog info to check members
+            try {
+              const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
+              const members = (fullDialog.data || fullDialog).members || [];
+              
+              // Check if this dialog has exactly 2 members: current user and the other user
+              const dialogMemberIds = members.map(m => m.userId);
+              if (dialogMemberIds.length === 2 && 
+                  dialogMemberIds.includes(currentUserId) && 
+                  dialogMemberIds.includes(otherUserId)) {
+                console.log(`✅ Found existing P2P dialog ${dialog.dialogId} between ${currentUserId} and ${otherUserId}`);
+                existingDialog = dialog;
+                break;
+              }
+            } catch (error) {
+              console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
+              // Continue checking other dialogs
+            }
+          }
+        }
+
+        // Check if there are more pages
+        hasMoreDialogs = userDialogs.pagination && userPage < userDialogs.pagination.pages;
+        userPage++;
+      }
+
+      if (existingDialog) {
+        // Return existing dialog
+        return res.json({
+          success: true,
+          data: existingDialog,
+          message: 'Dialog already exists',
+        });
+      }
+
+      console.log(`ℹ️ No existing P2P dialog found, creating new one`);
+    }
+
     // Create dialog
     const dialog = await Chat3Client.createDialog({
       name,
@@ -153,10 +223,6 @@ router.post('/', async (req, res) => {
 
     // Add creator as member
     await Chat3Client.addDialogMember(dialogId, req.user.userId);
-
-    // Set role: owner for creator (only for group chats)
-    const totalMembers = 1 + memberIds.length; // creator + other members
-    const finalChatType = chatType || (totalMembers === 2 ? 'p2p' : 'group');
     
     if (finalChatType === 'group') {
       try {
@@ -227,6 +293,8 @@ router.get('/public', async (req, res) => {
     // Build filter for public groups: (meta.type,eq,group)&(meta.groupType,eq,public)
     const filter = `(meta.type,eq,group)&(meta.groupType,eq,public)`;
     
+    console.log(`🔍 Getting public groups with filter: ${filter}, page: ${page}, limit: ${limit}`);
+    
     // Get all public groups using filter (without user context)
     const result = await Chat3Client.getDialogs({
       page: parseInt(page),
@@ -234,16 +302,42 @@ router.get('/public', async (req, res) => {
       filter: filter,
     });
 
+    console.log(`✅ Got result from Chat3 API:`, {
+      dataLength: result.data?.length || 0,
+      pagination: result.pagination,
+    });
+
     const publicGroups = result.data || [];
 
     // Get user's dialog IDs to exclude already joined groups
-    const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
-      limit: 1000, // Get all user dialogs
-    });
-    const userDialogIds = new Set((userDialogs.data || []).map(d => d.dialogId));
+    // Chat3 API allows max limit of 100, so we need to paginate if needed
+    const userDialogIds = new Set();
+    let userPage = 1;
+    let hasMoreUserDialogs = true;
+    
+    while (hasMoreUserDialogs) {
+      const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
+        page: userPage,
+        limit: 100, // Max allowed by Chat3 API
+      });
+      
+      if (userDialogs.data && userDialogs.data.length > 0) {
+        userDialogs.data.forEach(d => userDialogIds.add(d.dialogId));
+        hasMoreUserDialogs = userDialogs.pagination && userPage < userDialogs.pagination.pages;
+        userPage++;
+      } else {
+        hasMoreUserDialogs = false;
+      }
+    }
+
+    console.log(`📊 Public groups found: ${publicGroups.length}, User dialog IDs: ${userDialogIds.size}`);
+    console.log(`📋 Public group IDs:`, publicGroups.map(g => g.dialogId));
+    console.log(`👤 User dialog IDs:`, Array.from(userDialogIds));
 
     // Filter out groups user is already a member of
     const availableGroups = publicGroups.filter(group => !userDialogIds.has(group.dialogId));
+
+    console.log(`✅ Available groups (after filtering): ${availableGroups.length}`);
 
     res.json({
       success: true,
@@ -292,13 +386,16 @@ router.post('/:dialogId/join', async (req, res) => {
       });
     }
 
-    // Check if user is already a member
-    const userDialogs = await Chat3Client.getUserDialogs(currentUserId, {
-      dialogId,
-      limit: 1,
-    });
+    // Check if user is already a member by checking dialog members
+    const dialogData = dialog.data;
+    const members = dialogData?.members || [];
+    const isMember = members.some(member => member.userId === currentUserId);
 
-    if (userDialogs.data && userDialogs.data.length > 0) {
+    console.log(`🔍 Checking membership for user ${currentUserId} in dialog ${dialogId}`);
+    console.log(`📋 Dialog members:`, members.map(m => m.userId));
+    console.log(`✅ Is member: ${isMember}`);
+
+    if (isMember) {
       return res.status(400).json({
         success: false,
         error: 'User is already a member of this group',
