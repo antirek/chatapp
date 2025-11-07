@@ -306,7 +306,7 @@ async function leaveGroup() {
     await api.removeDialogMember(props.dialog.dialogId, authStore.user.userId)
     
     // Reload dialogs list
-    await dialogsStore.loadDialogs()
+    await dialogsStore.fetchDialogs()
     
     // Emit event and close modal
     emit('left-group')
