@@ -24,7 +24,11 @@
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div
+      ref="scrollContainer"
+      class="flex-1 overflow-y-auto min-h-0"
+      @scroll="handleScroll"
+    >
       <!-- Search Mode -->
       <div v-if="isSearchActive" class="flex-1">
         <div v-if="isSearching" class="flex items-center justify-center p-8 text-gray-400">
@@ -295,6 +299,18 @@
           </button>
         </div>
 
+        <div v-if="!isSearchActive && dialogsStore.dialogs.length > 0" class="py-2">
+          <div v-if="isLoadingMore" class="p-4 text-center text-gray-400 text-sm">
+            Загрузка ещё...
+          </div>
+          <div
+            v-else-if="!dialogsStore.isLoading && !isLoadingMore && !hasMoreDialogs"
+            class="p-4 text-center text-gray-300 text-xs"
+          >
+            Больше диалогов нет
+          </div>
+        </div>
+
         <div v-else class="flex flex-col items-center justify-center p-8 text-gray-400">
           <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -307,7 +323,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useAuthStore } from '@/stores/auth'
@@ -320,11 +336,13 @@ defineEmits<{
 
 const dialogsStore = useDialogsStore()
 const authStore = useAuthStore()
-const { isSearching, searchError, searchResults, lastSearchTerm } = storeToRefs(dialogsStore)
+const { isSearching, searchError, searchResults, lastSearchTerm, isLoadingMore, hasMoreDialogs } = storeToRefs(dialogsStore)
 
 const searchTerm = ref(lastSearchTerm.value || '')
 const MIN_SEARCH_LENGTH = 2
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+const scrollContainer = ref<HTMLElement | null>(null)
+const LOAD_MORE_THRESHOLD_PX = 200
 
 const isSearchActive = computed(() => (searchTerm.value || '').trim().length >= MIN_SEARCH_LENGTH)
 const hasSearchResults = computed(() => {
@@ -386,6 +404,11 @@ onMounted(() => {
   if (searchTerm.value.trim().length >= MIN_SEARCH_LENGTH) {
     void performSearch(searchTerm.value.trim())
   }
+  void nextTick(() => {
+    if (!isSearchActive.value) {
+      handleScroll()
+    }
+  })
 })
 
 onUnmounted(() => {
@@ -394,6 +417,29 @@ onUnmounted(() => {
     searchTimer = null
   }
 })
+
+watch(
+  () => dialogsStore.dialogs.length,
+  async () => {
+    await nextTick()
+    if (!isSearchActive.value) {
+      handleScroll()
+    }
+  }
+)
+
+watch(
+  isSearchActive,
+  async (active) => {
+    if (!active) {
+      await nextTick()
+      if (scrollContainer.value) {
+        scrollContainer.value.scrollTop = 0
+      }
+      handleScroll()
+    }
+  }
+)
 
 function clearSearchTerm() {
   searchTerm.value = ''
@@ -509,6 +555,28 @@ function formatTime(timestamp: string | number): string {
     return 'вчера'
   } else {
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+  }
+}
+
+function handleScroll() {
+  if (isSearchActive.value) {
+    return
+  }
+
+  const container = scrollContainer.value
+  if (!container) {
+    return
+  }
+
+  const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+
+  if (
+    distanceToBottom <= LOAD_MORE_THRESHOLD_PX &&
+    !dialogsStore.isLoading &&
+    !isLoadingMore.value &&
+    hasMoreDialogs.value
+  ) {
+    void dialogsStore.loadMoreDialogs()
   }
 }
 </script>

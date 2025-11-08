@@ -1,14 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { normalizeMessageType } from '@/utils/messageType'
-import type { Dialog, DialogSearchResponse } from '@/types'
+import type { Dialog, DialogSearchResponse, PaginatedResponse } from '@/types'
 
 export const useDialogsStore = defineStore('dialogs', () => {
   const dialogs = ref<Dialog[]>([])
   const currentDialog = ref<Dialog | null>(null)
   const isLoading = ref(false)
+  const isLoadingMore = ref(false)
   const error = ref<string | null>(null)
+  const pagination = ref<PaginatedResponse<Dialog>['pagination'] | null>(null)
   const isSearching = ref(false)
   const searchError = ref<string | null>(null)
   const lastSearchTerm = ref('')
@@ -28,53 +30,146 @@ export const useDialogsStore = defineStore('dialogs', () => {
   }>({})
   const searchSequence = ref(0)
 
-  async function fetchDialogs(params?: {
+  const hasMoreDialogs = computed(() => {
+    if (!pagination.value) {
+      return false
+    }
+    const currentPage = Number(pagination.value.page) || 0
+    const totalPages = Number(pagination.value.pages) || 0
+    return currentPage < totalPages
+  })
+
+  interface FetchDialogsParams {
     page?: number
     limit?: number
     includeLastMessage?: boolean
+    append?: boolean
     retries?: number
-  }) {
-    isLoading.value = true
-    error.value = null
+  }
+
+  async function fetchDialogs(params?: FetchDialogsParams) {
+    const page = params?.page ?? 1
+    const limit = params?.limit ?? pagination.value?.limit ?? 50
+    const includeLastMessage = params?.includeLastMessage ?? true
+    const append = params?.append ?? page > 1
+
+    if (append) {
+      if (isLoadingMore.value || isLoading.value) {
+        return
+      }
+      isLoadingMore.value = true
+    } else {
+      isLoading.value = true
+      error.value = null
+    }
 
     const maxRetries = params?.retries ?? 3
     let lastError: any = null
 
+    const clearLoadingState = () => {
+      if (append) {
+        isLoadingMore.value = false
+      } else {
+        isLoading.value = false
+      }
+    }
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const response = await api.getDialogs({
-          page: params?.page || 1,
-          limit: params?.limit || 50,
-          includeLastMessage: params?.includeLastMessage ?? true
+          page,
+          limit,
+          includeLastMessage
         })
 
         const normalizedDialogs = response.data.map(dialog => normalizeDialog(dialog))
-        dialogs.value = normalizedDialogs
-        response.data = normalizedDialogs
-        error.value = null // Clear error on success
-        isLoading.value = false // Clear loading state on success
-        return response
+        const rawPagination = response.pagination || {
+          page,
+          limit,
+          total: normalizedDialogs.length,
+          pages: normalizedDialogs.length ? 1 : 0
+        }
+
+        const parsedPage = Number(rawPagination.page)
+        const parsedLimit = Number(rawPagination.limit)
+        const parsedTotal = Number(rawPagination.total)
+        const parsedPages = Number(rawPagination.pages)
+
+        const sanitizedLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : limit
+        const sanitizedTotal = Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : normalizedDialogs.length
+        const computedPages = sanitizedLimit > 0 ? Math.ceil(sanitizedTotal / sanitizedLimit) : 0
+
+        const sanitizedPagination = {
+          page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : page,
+          limit: sanitizedLimit,
+          total: sanitizedTotal,
+          pages: Number.isFinite(parsedPages) && parsedPages >= 0 ? parsedPages : (sanitizedTotal === 0 ? 0 : Math.max(1, computedPages))
+        }
+
+        pagination.value = sanitizedPagination
+
+        if (append) {
+          const existing = dialogs.value.slice()
+          const indexMap = new Map(existing.map((dialog, idx) => [dialog.dialogId, idx]))
+
+          for (const dialog of normalizedDialogs) {
+            const existingIndex = indexMap.get(dialog.dialogId)
+            if (existingIndex != null) {
+              existing[existingIndex] = dialog
+            } else {
+              existing.push(dialog)
+            }
+          }
+
+          dialogs.value = existing
+        } else {
+          dialogs.value = normalizedDialogs
+        }
+
+        error.value = null
+
+        clearLoadingState()
+
+        return {
+          ...response,
+          data: normalizedDialogs,
+          pagination: sanitizedPagination
+        }
       } catch (err: any) {
         lastError = err
         const isNetworkError = err.code === 'ERR_NETWORK' || err.code === 'ECONNREFUSED'
-        
-        // Retry only on network errors and if we have retries left
+
         if (isNetworkError && attempt < maxRetries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 5000) // Exponential backoff: 1s, 2s, 4s, max 5s
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
           console.log(`⏳ Failed to load dialogs (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`)
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
-        
-        // Don't retry on auth errors or after max retries
+
         break
       }
     }
 
-    // If we got here, all retries failed
-    error.value = lastError?.response?.data?.error || lastError?.message || 'Failed to load dialogs'
-    isLoading.value = false
+    const message = lastError?.response?.data?.error || lastError?.message || 'Failed to load dialogs'
+    error.value = message
+    clearLoadingState()
     throw lastError
+  }
+
+  async function loadMoreDialogs() {
+    if (isLoading.value || isLoadingMore.value || !hasMoreDialogs.value) {
+      return
+    }
+
+    const nextPage = (pagination.value?.page ?? 1) + 1
+    const limit = pagination.value?.limit ?? 50
+
+    await fetchDialogs({
+      page: nextPage,
+      limit,
+      includeLastMessage: true,
+      append: true
+    })
   }
 
   async function createDialog(name: string, memberIds?: string[]) {
@@ -83,20 +178,26 @@ export const useDialogsStore = defineStore('dialogs', () => {
 
     try {
       const response = await api.createDialog({ name, memberIds })
-      
-      // Check if dialog already exists in list (for P2P dialogs that already exist)
+
       if (response.data) {
-        const dialogId = response.data.dialogId
+        const normalizedDialog = normalizeDialog(response.data as Dialog)
+        const dialogId = normalizedDialog.dialogId
         const existingIndex = dialogs.value.findIndex(d => d.dialogId === dialogId)
-        
+
         if (existingIndex !== -1) {
-          // Dialog already exists - update it instead of adding duplicate
-          dialogs.value[existingIndex] = response.data as Dialog
+          dialogs.value[existingIndex] = normalizedDialog
           console.log(`✅ Updated existing dialog ${dialogId} in list`)
         } else {
-          // New dialog - add to list
-          dialogs.value.unshift(response.data as Dialog)
+          dialogs.value.unshift(normalizedDialog)
           console.log(`✅ Added new dialog ${dialogId} to list`)
+        }
+
+        if (pagination.value) {
+          pagination.value.total = (pagination.value.total || 0) + (existingIndex === -1 ? 1 : 0)
+          pagination.value.pages = Math.max(
+            pagination.value.pages || 1,
+            Math.ceil((pagination.value.total || 0) / (pagination.value.limit || 50))
+          )
         }
       }
 
@@ -111,14 +212,10 @@ export const useDialogsStore = defineStore('dialogs', () => {
 
   async function selectDialog(dialogId: string) {
     const dialog = dialogs.value.find(d => d.dialogId === dialogId)
-    
+
     if (dialog) {
       currentDialog.value = dialog
-      
-      // Don't reset unread count here - it should only be reset when messages are actually read
-      // The unread count will be updated by WebSocket when user reads messages
     } else {
-      // Fetch dialog if not in list
       try {
         const response = await api.getDialog(dialogId)
         if (response.data) {
@@ -172,7 +269,6 @@ export const useDialogsStore = defineStore('dialogs', () => {
       dialog.lastMessageAt = message.createdAt
       dialog.lastInteractionAt = message.createdAt
 
-      // Move to top
       const index = dialogs.value.indexOf(dialog)
       if (index > 0) {
         dialogs.value.splice(index, 1)
@@ -269,8 +365,12 @@ export const useDialogsStore = defineStore('dialogs', () => {
     dialogs,
     currentDialog,
     isLoading,
+    isLoadingMore,
     error,
+    pagination,
+    hasMoreDialogs,
     fetchDialogs,
+    loadMoreDialogs,
     createDialog,
     selectDialog,
     updateDialogUnreadCount,

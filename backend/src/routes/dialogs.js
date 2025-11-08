@@ -631,16 +631,41 @@ router.post('/:dialogId/join', async (req, res) => {
 router.get('/:dialogId', async (req, res) => {
   try {
     const { dialogId } = req.params;
+    const currentUserId = req.user.userId;
     const result = await Chat3Client.getDialog(dialogId);
+
+    const dialogData = result?.data || result;
+    if (!dialogData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Dialog not found',
+      });
+    }
+
+    const dialogWithContext = {
+      ...dialogData,
+      unreadCount: dialogData.context?.unreadCount || 0,
+      lastSeenAt: dialogData.context?.lastSeenAt,
+      lastMessageAt: dialogData.context?.lastMessageAt,
+      isActive: dialogData.context?.isActive ?? false,
+      joinedAt: dialogData.context?.joinedAt,
+    };
+
+    const processed = await processP2PDialog(dialogWithContext, currentUserId);
+    const chatType = processed.chatType || dialogWithContext.meta?.type || dialogWithContext.type || 'group';
 
     res.json({
       success: true,
-      dialog: result.data,
+      data: {
+        ...processed,
+        chatType,
+      },
     });
   } catch (error) {
-    res.status(500).json({
+    const status = error.response?.status === 404 ? 404 : 500;
+    res.status(status).json({
       success: false,
-      error: error.message,
+      error: error.response?.data?.error || error.message || 'Failed to fetch dialog',
     });
   }
 });
