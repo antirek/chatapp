@@ -1,6 +1,7 @@
 import express from 'express';
 import Chat3Client from '../services/Chat3Client.js';
 import { authenticate } from '../middleware/auth.js';
+import { mapOutgoingMessageType } from '../utils/messageType.js';
 
 const router = express.Router();
 
@@ -70,20 +71,48 @@ router.post('/dialog/:dialogId', async (req, res) => {
   try {
     const { dialogId } = req.params;
     const { content, type = 'text', meta = {} } = req.body;
+    const mappedType = mapOutgoingMessageType(type);
+    const trimmedContent = typeof content === 'string' ? content.trim() : '';
 
-    if (!content) {
+    const requiresContent = !mappedType || mappedType === 'internal.text' || mappedType.startsWith('system.');
+    const mediaTypesRequiringUrl = new Set([
+      'internal.image',
+      'internal.file',
+      'internal.video',
+      'internal.audio'
+    ]);
+
+    let effectiveContent = trimmedContent;
+
+    if (!effectiveContent && mediaTypesRequiringUrl.has(mappedType)) {
+      effectiveContent = meta?.originalName || `[${mappedType.split('.').pop() || 'attachment'}]`;
+    }
+
+    if (requiresContent && !effectiveContent) {
       return res.status(400).json({
         success: false,
         error: 'Message content is required',
       });
     }
 
-    const result = await Chat3Client.createMessage(dialogId, {
-      content,
+    if (mediaTypesRequiringUrl.has(mappedType) && !meta?.url) {
+      return res.status(400).json({
+        success: false,
+        error: 'Media messages require meta.url',
+      });
+    }
+
+    const messagePayload = {
       senderId: req.user.userId,
-      type,
+      type: mappedType,
       meta,
-    });
+    };
+
+    if (effectiveContent) {
+      messagePayload.content = effectiveContent;
+    }
+
+    const result = await Chat3Client.createMessage(dialogId, messagePayload);
 
     // ✅ Updates come ONLY through RabbitMQ from Chat3 Update Worker
     // No fallback - pure RabbitMQ architecture

@@ -4,6 +4,7 @@ import api from '@/services/api'
 import websocket from '@/services/websocket'
 import type { Message, SendMessageData } from '@/types'
 import { useAuthStore } from './auth'
+import { ensureNormalizedMessage, mapOutgoingMessageType } from '@/utils/messageType'
 
 export const useMessagesStore = defineStore('messages', () => {
   const messages = ref<Message[]>([])
@@ -39,7 +40,9 @@ export const useMessagesStore = defineStore('messages', () => {
         limit: params?.limit || 50
       })
 
-      messages.value = response.data
+      const normalizedMessages = response.data.map((message) => ensureNormalizedMessage(message))
+      messages.value = normalizedMessages
+      response.data = normalizedMessages
       return response
     } catch (err: any) {
       error.value = err.response?.data?.error || err.message
@@ -53,7 +56,12 @@ export const useMessagesStore = defineStore('messages', () => {
     error.value = null
 
     try {
-      const response = await api.sendMessage(dialogId, messageData)
+      const payload: SendMessageData = {
+        ...messageData,
+        type: mapOutgoingMessageType(messageData.type)
+      }
+
+      const response = await api.sendMessage(dialogId, payload)
       
       // Add message immediately (optimistic update)
       if (response.success && response.data) {
@@ -70,12 +78,12 @@ export const useMessagesStore = defineStore('messages', () => {
 
   function addMessage(message: Message) {
     // Check if message already exists by messageId (primary) or _id (fallback)
-    const exists = messages.value.some(m => 
-      (message.messageId && m.messageId === message.messageId) || 
+    const exists = messages.value.some(m =>
+      (message.messageId && m.messageId === message.messageId) ||
       (m._id && m._id === message._id)
     )
     if (!exists) {
-      messages.value.push(message)
+      messages.value.push(ensureNormalizedMessage(message))
     }
   }
 
@@ -123,10 +131,10 @@ export const useMessagesStore = defineStore('messages', () => {
       }
       
       // Create new message object and new array to trigger reactivity
-      const updatedMessage = {
+      const updatedMessage = ensureNormalizedMessage({
         ...message,
         statuses: newStatuses
-      }
+      })
       
       // Replace entire array to trigger reactivity
       messages.value = [
@@ -138,10 +146,10 @@ export const useMessagesStore = defineStore('messages', () => {
       console.log('✅ Message updated with new statuses:', { messageId, statuses: newStatuses })
     } else {
       // Regular update - replace message object
-      const updatedMessage = {
+      const updatedMessage = ensureNormalizedMessage({
         ...message,
         ...updates
-      }
+      })
       
       // Replace entire array to trigger reactivity
       messages.value = [

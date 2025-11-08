@@ -78,6 +78,9 @@ interface ImageMessagePayload {
   fileId?: string | null
   originalName: string
   mimeType: string
+  size: number
+  width?: number
+  height?: number
 }
 
 const emit = defineEmits<{
@@ -176,12 +179,16 @@ async function handleFileChange(event: Event) {
 
   try {
     const result = await uploadImageToFilebump(file)
+    const dimensions = await readImageDimensions(file)
 
     emit('send-image', {
       url: result.url,
       fileId: result.fileId,
       originalName: result.originalName,
-      mimeType: result.mimeType
+      mimeType: result.mimeType,
+      size: file.size,
+      width: dimensions?.width,
+      height: dimensions?.height
     })
   } catch (error: any) {
     console.error('Failed to upload image:', error)
@@ -192,6 +199,25 @@ async function handleFileChange(event: Event) {
       input.value = ''
     }
   }
+}
+
+function readImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const image = new Image()
+
+    image.onload = () => {
+      resolve({ width: image.width, height: image.height })
+      URL.revokeObjectURL(url)
+    }
+
+    image.onerror = () => {
+      resolve(null)
+      URL.revokeObjectURL(url)
+    }
+
+    image.src = url
+  })
 }
 </script>
 

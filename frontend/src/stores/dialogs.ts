@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
+import { normalizeMessageType } from '@/utils/messageType'
 import type { Dialog } from '@/types'
 
 export const useDialogsStore = defineStore('dialogs', () => {
@@ -29,7 +30,9 @@ export const useDialogsStore = defineStore('dialogs', () => {
           includeLastMessage: params?.includeLastMessage ?? true
         })
 
-        dialogs.value = response.data
+        const normalizedDialogs = response.data.map(dialog => normalizeDialog(dialog))
+        dialogs.value = normalizedDialogs
+        response.data = normalizedDialogs
         error.value = null // Clear error on success
         isLoading.value = false // Clear loading state on success
         return response
@@ -101,7 +104,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
       try {
         const response = await api.getDialog(dialogId)
         if (response.data) {
-          currentDialog.value = response.data as Dialog
+          currentDialog.value = normalizeDialog(response.data as Dialog)
         }
       } catch (err) {
         console.error('Failed to fetch dialog:', err)
@@ -126,11 +129,27 @@ export const useDialogsStore = defineStore('dialogs', () => {
   function updateLastMessage(dialogId: string, message: any) {
     const dialog = dialogs.value.find(d => d.dialogId === dialogId)
     if (dialog) {
+      const normalizedType = normalizeMessageType(message.type, message.meta)
+      const rawContent = typeof message.content === 'string' ? message.content.trim() : ''
+      let adjustedContent = rawContent
+
+      if (normalizedType === 'image' && (!adjustedContent || adjustedContent === '[image]')) {
+        adjustedContent = message.meta?.originalName || '[Изображение]'
+      } else if (normalizedType !== 'text' && adjustedContent === `[${normalizedType}]`) {
+        adjustedContent = message.meta?.originalName || '[Вложение]'
+      }
+
+      const fallbackContent =
+        adjustedContent ||
+        message.meta?.originalName ||
+        (normalizedType === 'image' ? '[Изображение]' : '[Вложение]')
+
       dialog.lastMessage = {
-        content: message.content,
+        content: fallbackContent,
         senderId: message.senderId,
         type: message.type,
-        createdAt: message.createdAt
+        createdAt: message.createdAt,
+        normalizedType
       }
       dialog.lastMessageAt = message.createdAt
       dialog.lastInteractionAt = message.createdAt
@@ -140,6 +159,20 @@ export const useDialogsStore = defineStore('dialogs', () => {
       if (index > 0) {
         dialogs.value.splice(index, 1)
         dialogs.value.unshift(dialog)
+      }
+    }
+  }
+
+  function normalizeDialog(dialog: Dialog): Dialog {
+    if (!dialog.lastMessage) {
+      return dialog
+    }
+
+    return {
+      ...dialog,
+      lastMessage: {
+        ...dialog.lastMessage,
+        normalizedType: normalizeMessageType(dialog.lastMessage.type)
       }
     }
   }

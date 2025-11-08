@@ -45,10 +45,11 @@ export interface Dialog {
 }
 
 export interface LastMessage {
-  content: string
+  content?: string
   senderId: string
   type: string
   createdAt: string
+  normalizedType?: string
 }
 
 // Message types
@@ -64,7 +65,7 @@ export interface Message {
     phone?: string
     [key: string]: any
   }
-  content: string
+  content?: string
   type: string
   reactionCounts?: Record<string, number>
   createdAt: string | number
@@ -75,10 +76,11 @@ export interface Message {
     status: 'read' | 'unread' | 'delivered'
     createdAt?: string | number
   }>
+  normalizedType?: string
 }
 
 export interface SendMessageData {
-  content: string
+  content?: string
   type?: string
   meta?: Record<string, any>
 }

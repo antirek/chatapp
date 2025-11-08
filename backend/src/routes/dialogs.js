@@ -1,6 +1,7 @@
 import express from 'express';
 import Chat3Client from '../services/Chat3Client.js';
 import { authenticate } from '../middleware/auth.js';
+import { mapOutgoingMessageType } from '../utils/messageType.js';
 
 const router = express.Router();
 
@@ -394,7 +395,7 @@ router.post('/:dialogId/join', async (req, res) => {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вошел в группу`,
         senderId: 'system',
-        type: 'system',
+        type: mapOutgoingMessageType('system'),
       });
     } catch (error) {
       console.warn(`Failed to send system notification for user ${currentUserId}:`, error.message);
@@ -474,76 +475,40 @@ router.get('/:dialogId/members', async (req, res) => {
     const membersWithRoles = await Promise.all(
       members.map(async (member) => {
         try {
-          // Get role meta tag for this dialogMember
-          // Format: /meta/dialogMember/{dialogId}:{userId}/role
-          // Try different possible entityId formats
-          const entityIdFormats = [
-            `${dialogId}:${member.userId}`,  // Format 1: dialogId:userId (correct format)
-            `${dialogId}/${member.userId}`,  // Format 2: dialogId/userId (fallback)
-            `${dialogId}_${member.userId}`,  // Format 3: dialogId_userId (fallback)
-            member.userId,                    // Format 4: just userId (fallback)
-          ];
-          
+          const entityId = `${dialogId}:${member.userId}`; // canonical format expected by Chat3
+
           let role = null;
-          let roleMeta = null;
           
-          // Try each format until we find the role
-          for (const entityId of entityIdFormats) {
-            try {
-              // First try to get specific 'role' key
+          try {
+            // Попробуем получить значение по ключу role
+            const roleMeta = await Chat3Client.getMeta('dialogMember', entityId, 'role');
+            console.log(`🔍 Getting role key for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, roleMeta);
+            role = roleMeta?.value || roleMeta?.data?.value || roleMeta?.data || roleMeta || null;
+          } catch (keyError) {
+            if (keyError.response?.status !== 404) {
+              console.warn(`⚠️ Error getting role key for member ${member.userId} with entityId ${entityId}:`, keyError.message);
+            } else {
+              // Если конкретный ключ не найден — запросим весь meta для канонического ID
               try {
-                roleMeta = await Chat3Client.getMeta('dialogMember', entityId, 'role');
-                console.log(`🔍 Getting role key for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, roleMeta);
-                
-                // Extract role from response
-                role = roleMeta?.value || roleMeta?.data?.value || roleMeta?.data || roleMeta || null;
-                
-                if (role) {
-                  console.log(`✅ Found role for member ${member.userId} using entityId format: ${entityId}, role:`, role);
-                  break; // Found role, stop trying other formats
-                }
-              } catch (keyError) {
-                // If specific key not found, try getting all meta tags
-                try {
-                  roleMeta = await Chat3Client.getMeta('dialogMember', entityId);
-                  
-                  // Log for debugging
-                  console.log(`🔍 Getting all meta for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, {
-                    entityId,
-                    roleMeta,
-                    roleMetaType: typeof roleMeta,
-                    roleMetaKeys: roleMeta ? Object.keys(roleMeta) : null
-                  });
-                  
-                  // Try different formats for role extraction
-                  if (roleMeta) {
-                    // Try different possible formats
-                    role = roleMeta?.role?.value || 
-                           roleMeta?.role || 
-                           roleMeta?.data?.role?.value || 
-                           roleMeta?.data?.role ||
-                           (roleMeta?.data && typeof roleMeta.data === 'object' && 'role' in roleMeta.data ? roleMeta.data.role : null) ||
-                           null;
-                    
-                    if (role) {
-                      console.log(`✅ Found role for member ${member.userId} using entityId format: ${entityId}, role:`, role);
-                      break; // Found role, stop trying other formats
-                    }
-                  }
-                } catch (allMetaError) {
-                  // Try next format
-                  if (allMetaError.response?.status !== 404) {
-                    console.warn(`⚠️ Error getting meta for member ${member.userId} with entityId ${entityId}:`, allMetaError.message);
-                  }
-                  continue;
+                const metaResponse = await Chat3Client.getMeta('dialogMember', entityId);
+                console.log(`🔍 Getting all meta for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`, {
+                  entityId,
+                  metaResponse,
+                  metaType: typeof metaResponse,
+                  metaKeys: metaResponse ? Object.keys(metaResponse) : null
+                });
+
+                role = metaResponse?.role?.value ||
+                       metaResponse?.role ||
+                       metaResponse?.data?.role?.value ||
+                       metaResponse?.data?.role ||
+                       (metaResponse?.data && typeof metaResponse.data === 'object' && 'role' in metaResponse.data ? metaResponse.data.role : null) ||
+                       null;
+              } catch (metaError) {
+                if (metaError.response?.status !== 404) {
+                  console.warn(`⚠️ Error getting meta for member ${member.userId} with entityId ${entityId}:`, metaError.message);
                 }
               }
-            } catch (error) {
-              // Try next format
-              if (error.response?.status !== 404) {
-                console.warn(`⚠️ Error getting role for member ${member.userId} with entityId ${entityId}:`, error.message);
-              }
-              continue;
             }
           }
           
@@ -609,7 +574,7 @@ router.post('/:dialogId/members', async (req, res) => {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вошел в группу`,
         senderId: 'system',
-        type: 'system',
+        type: mapOutgoingMessageType('system'),
       });
     } catch (error) {
       console.warn(`Failed to send system notification for user ${userId}:`, error.message);
@@ -651,7 +616,7 @@ router.delete('/:dialogId/members/:userId', async (req, res) => {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вышел из группы`,
         senderId: 'system',
-        type: 'system',
+        type: mapOutgoingMessageType('system'),
       });
     } catch (error) {
       console.warn(`Failed to send system notification for user ${userId}:`, error.message);

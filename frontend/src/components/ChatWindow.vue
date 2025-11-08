@@ -93,7 +93,9 @@
               </p>
             </template>
             <template v-else>
-              <div class="break-words">{{ message.content }}</div>
+              <div class="break-words">
+                {{ getTextContent(message) }}
+              </div>
             </template>
 
             <!-- Message Time with Read Status -->
@@ -204,6 +206,7 @@ import GroupInfoModal from './GroupInfoModal.vue'
 import AddGroupMembersModal from './AddGroupMembersModal.vue'
 import Avatar from './Avatar.vue'
 import type { Dialog, Message } from '@/types'
+import { normalizeMessageType } from '@/utils/messageType'
 
 const props = defineProps<{
   dialog: Dialog
@@ -218,6 +221,10 @@ interface ImageMessagePayload {
   fileId?: string | null
   originalName: string
   mimeType: string
+  size: number
+  width?: number
+  height?: number
+  caption?: string
 }
 
 const authStore = useAuthStore()
@@ -287,13 +294,16 @@ function isOwnMessage(message: Message): boolean {
   return result
 }
 
+function getNormalizedType(message: Message): string {
+  return message.normalizedType || normalizeMessageType(message.type, message.meta)
+}
+
 function isSystemNotification(message: Message): boolean {
-  return message.type === 'system'
+  return getNormalizedType(message) === 'system'
 }
 
 function isImageMessage(message: Message): boolean {
-  const type = (message.type || message.meta?.type || '').toLowerCase()
-  return type === 'image'
+  return getNormalizedType(message) === 'image'
 }
 
 function getImageUrl(message: Message): string {
@@ -311,6 +321,34 @@ function getImageAlt(message: Message): string {
     return message.meta.originalName
   }
   return 'Изображение'
+}
+
+function getTextContent(message: Message): string {
+  const normalizedType = getNormalizedType(message)
+  const rawContent = typeof message.content === 'string' ? message.content.trim() : ''
+  const placeholderTokens = new Set(['[image]', '[file]', '[audio]', '[video]', '[attachment]'])
+
+  if (rawContent && !placeholderTokens.has(rawContent.toLowerCase())) {
+    return rawContent
+  }
+
+  if (isImageMessage(message)) {
+    return message.meta?.originalName || '[Изображение]'
+  }
+
+  if (message.meta?.originalName) {
+    return message.meta.originalName
+  }
+
+  if (message.meta?.url) {
+    return message.meta.url
+  }
+
+  if (normalizedType && normalizedType !== 'text') {
+    return `[${normalizedType}]`
+  }
+
+  return '[Вложение]'
 }
 
 function getMessageBubbleClasses(message: Message): string {
@@ -535,16 +573,25 @@ async function handleSendImage(payload: ImageMessagePayload) {
   if (!props.dialog) return
 
   try {
-    await messagesStore.sendMessage(props.dialog.dialogId, {
-      content: payload.url,
+    const messagePayload: SendMessageData = {
       type: 'image',
       meta: {
         url: payload.url,
         fileId: payload.fileId,
         originalName: payload.originalName,
-        mimeType: payload.mimeType
+        mimeType: payload.mimeType,
+        size: payload.size,
+        ...(payload.width ? { width: payload.width } : {}),
+        ...(payload.height ? { height: payload.height } : {})
       }
-    })
+    }
+
+    const caption = payload.caption?.trim()
+    if (caption) {
+      messagePayload.content = caption
+    }
+
+    await messagesStore.sendMessage(props.dialog.dialogId, messagePayload)
   } catch (error) {
     console.error('Failed to send image message:', error)
   }
