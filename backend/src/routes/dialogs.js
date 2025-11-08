@@ -219,6 +219,12 @@ router.get('/search', async (req, res) => {
   const escaped = escapeRegex(trimmedSearch);
   const nameMetaKey = `p2pDialogNameFor${currentUserId}`;
   const pattern = `.*${escaped}.*`;
+  const searchLower = trimmedSearch.toLowerCase();
+
+  const matchesName = (dialog) => {
+    const dialogName = (dialog?.name || dialog?.dialogName || '').toString();
+    return dialogName.toLowerCase().includes(searchLower);
+  };
 
   const p2pFilter = `(meta.type,eq,p2p)&(meta.${nameMetaKey},regex,"${pattern}")`;
   const groupsFilter = `(meta.type,eq,group)&(name,regex,"${pattern}")`;
@@ -259,7 +265,7 @@ router.get('/search', async (req, res) => {
     const processedGroups = (groupResult.data || []).map((dialog) => ({
       ...dialog,
       chatType: 'group',
-    }));
+    })).filter(matchesName);
 
     const processedPublic = (publicResult.data || []).map((dialog) => ({
       ...dialog,
@@ -269,7 +275,7 @@ router.get('/search', async (req, res) => {
         groupType: dialog.meta?.groupType || 'public',
       },
       isPublic: true,
-    }));
+    })).filter(matchesName);
 
     res.json({
       success: true,
