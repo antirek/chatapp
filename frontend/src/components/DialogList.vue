@@ -1,88 +1,314 @@
 <template>
-  <div class="flex-1 overflow-y-auto">
-    <!-- Loading State -->
-    <div v-if="dialogsStore.isLoading" class="flex items-center justify-center p-8">
-      <div class="text-gray-400">Загрузка...</div>
+  <div class="flex-1 flex flex-col bg-white">
+    <div class="p-3 border-b border-gray-200">
+      <div class="relative">
+        <input
+          v-model="searchTerm"
+          type="text"
+          class="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 placeholder-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+          placeholder="Поиск по диалогам..."
+        />
+        <svg class="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35m0 0a7 7 0 10-9.9 0 7 7 0 009.9 0z" />
+        </svg>
+        <button
+          v-if="searchTerm.trim().length > 0"
+          class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+          @click="clearSearchTerm"
+        >
+          <span class="sr-only">Очистить поиск</span>
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <!-- Error State -->
-    <div v-else-if="dialogsStore.error" class="flex flex-col items-center justify-center p-8 text-red-500">
-      <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <p class="mb-2 font-semibold">Ошибка загрузки</p>
-      <p class="text-sm text-gray-500 mb-4 text-center">{{ dialogsStore.error }}</p>
-      <button 
-        @click="retryLoadDialogs"
-        class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-      >
-        Повторить попытку
-      </button>
-    </div>
-
-    <!-- Dialogs -->
-    <div v-else-if="dialogsStore.dialogs.length > 0" class="divide-y divide-gray-200">
-      <button
-        v-for="dialog in dialogsStore.dialogs"
-        :key="dialog.dialogId"
-        @click="$emit('select', dialog.dialogId)"
-        class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
-        :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
-      >
-        <!-- Avatar -->
-        <div class="flex-shrink-0">
-          <Avatar
-            :avatar="getDialogAvatar(dialog)"
-            :name="dialog.name || dialog.dialogName || 'Диалог'"
-            :userId="getDialogOtherUserId(dialog)"
-            :is-group="isGroupChat(dialog)"
-            size="md"
-            shape="circle"
-          />
+    <div class="flex-1 overflow-y-auto">
+      <!-- Search Mode -->
+      <div v-if="isSearchActive" class="flex-1">
+        <div v-if="isSearching" class="flex items-center justify-center p-8 text-gray-400">
+          Идет поиск...
         </div>
 
-        <!-- Dialog Content -->
-        <div class="flex-1 min-w-0">
-          <!-- Dialog Name -->
-          <div class="flex items-start justify-between mb-1">
-            <h3 class="font-semibold text-gray-900 truncate flex-1">
-              {{ dialog.name || dialog.dialogName || 'Диалог' }}
-            </h3>
-            
-            <!-- Time -->
-            <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
-              {{ formatTime(dialog.lastMessageAt) }}
-            </span>
+        <div
+          v-else-if="searchError"
+          class="flex flex-col items-center justify-center p-8 text-red-500"
+        >
+          <svg class="w-14 h-14 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p class="mb-2 font-semibold">Ошибка поиска</p>
+          <p class="text-sm text-gray-500 text-center">{{ searchError }}</p>
+        </div>
+
+        <div v-else-if="hasSearchResults" class="space-y-6 py-4">
+          <div v-if="searchResults.personal.length > 0" class="px-2">
+            <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Личные чаты
+            </h4>
+            <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
+              <button
+                v-for="dialog in searchResults.personal"
+                :key="`personal-${dialog.dialogId}`"
+                @click="$emit('select', dialog.dialogId)"
+                class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
+                :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
+              >
+                <div class="flex-shrink-0">
+                  <Avatar
+                    :avatar="getDialogAvatar(dialog)"
+                    :name="dialog.name || dialog.dialogName || 'Диалог'"
+                    :userId="getDialogOtherUserId(dialog)"
+                    :is-group="isGroupChat(dialog)"
+                    size="md"
+                    shape="circle"
+                  />
+                </div>
+
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between mb-1">
+                    <h3 class="font-semibold text-gray-900 truncate flex-1 flex items-center gap-2">
+                      <span class="truncate">
+                        {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                      </span>
+                    </h3>
+                    <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
+                      {{ formatTime(dialog.lastMessageAt) }}
+                    </span>
+                  </div>
+                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                    {{ dialog.lastMessage.content }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="dialog.unreadCount > 0"
+                  class="absolute top-4 right-4 bg-primary-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium"
+                >
+                  {{ dialog.unreadCount > 9 ? '9+' : dialog.unreadCount }}
+                </div>
+              </button>
+            </div>
           </div>
 
-          <!-- Last Message -->
-          <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
-            {{ dialog.lastMessage.content }}
-          </p>
+          <div v-if="searchResults.groups.length > 0" class="px-2">
+            <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Мои группы
+            </h4>
+            <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
+              <button
+                v-for="dialog in searchResults.groups"
+                :key="`groups-${dialog.dialogId}`"
+                @click="$emit('select', dialog.dialogId)"
+                class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
+                :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
+              >
+                <div class="flex-shrink-0">
+                  <Avatar
+                    :avatar="getDialogAvatar(dialog)"
+                    :name="dialog.name || dialog.dialogName || 'Диалог'"
+                    :userId="getDialogOtherUserId(dialog)"
+                    :is-group="isGroupChat(dialog)"
+                    size="md"
+                    shape="circle"
+                  />
+                </div>
+
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between mb-1">
+                    <h3 class="font-semibold text-gray-900 truncate flex-1 flex items-center gap-2">
+                      <span
+                        class="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium flex-shrink-0"
+                        :class="getGroupBadgeClasses(dialog)"
+                        :title="getGroupBadgeLabel(dialog)"
+                        aria-hidden="true"
+                      >
+                        {{ getGroupBadgeIcon(dialog) }}
+                      </span>
+                      <span class="truncate">
+                        {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                      </span>
+                    </h3>
+                    <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
+                      {{ formatTime(dialog.lastMessageAt) }}
+                    </span>
+                  </div>
+                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                    {{ dialog.lastMessage.content }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="dialog.unreadCount > 0"
+                  class="absolute top-4 right-4 bg-primary-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium"
+                >
+                  {{ dialog.unreadCount > 9 ? '9+' : dialog.unreadCount }}
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="searchResults.publicGroups.length > 0" class="px-2">
+            <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Публичные группы
+            </h4>
+            <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
+              <button
+                v-for="dialog in searchResults.publicGroups"
+                :key="`public-${dialog.dialogId}`"
+                @click="$emit('select', dialog.dialogId)"
+                class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
+                :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
+              >
+                <div class="flex-shrink-0">
+                  <Avatar
+                    :avatar="getDialogAvatar(dialog)"
+                    :name="dialog.name || dialog.dialogName || 'Диалог'"
+                    :userId="getDialogOtherUserId(dialog)"
+                    :is-group="isGroupChat(dialog)"
+                    size="md"
+                    shape="circle"
+                  />
+                </div>
+
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between mb-1">
+                    <h3 class="font-semibold text-gray-900 truncate flex-1 flex items-center gap-2">
+                      <span
+                        class="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium flex-shrink-0"
+                        :class="getGroupBadgeClasses(dialog)"
+                        :title="getGroupBadgeLabel(dialog)"
+                        aria-hidden="true"
+                      >
+                        {{ getGroupBadgeIcon(dialog) }}
+                      </span>
+                      <span class="truncate">
+                        {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                      </span>
+                    </h3>
+                    <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
+                      {{ formatTime(dialog.lastMessageAt) }}
+                    </span>
+                  </div>
+                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                    {{ dialog.lastMessage.content }}
+                  </p>
+                  <p
+                    v-else-if="dialog.meta?.description"
+                    class="text-xs text-gray-500 truncate"
+                  >
+                    {{ dialog.meta.description }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="dialog.unreadCount > 0"
+                  class="absolute top-4 right-4 bg-primary-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium"
+                >
+                  {{ dialog.unreadCount > 9 ? '9+' : dialog.unreadCount }}
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <!-- Unread Badge -->
-        <div
-          v-if="dialog.unreadCount > 0"
-          class="absolute top-4 right-4 bg-primary-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium"
-        >
-          {{ dialog.unreadCount > 9 ? '9+' : dialog.unreadCount }}
+        <div v-else class="flex flex-col items-center justify-center p-8 text-gray-400">
+          <svg class="w-14 h-14 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p>Ничего не найдено</p>
         </div>
-      </button>
-    </div>
+      </div>
 
-    <!-- Empty State -->
-    <div v-else class="flex flex-col items-center justify-center p-8 text-gray-400">
-      <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-      </svg>
-      <p>Нет диалогов</p>
+      <!-- Default Mode -->
+      <div v-else class="flex-1">
+        <div v-if="dialogsStore.isLoading" class="flex items-center justify-center p-8">
+          <div class="text-gray-400">Загрузка...</div>
+        </div>
+
+        <div v-else-if="dialogsStore.error" class="flex flex-col items-center justify-center p-8 text-red-500">
+          <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p class="mb-2 font-semibold">Ошибка загрузки</p>
+          <p class="text-sm text-gray-500 mb-4 text-center">{{ dialogsStore.error }}</p>
+          <button 
+            @click="retryLoadDialogs"
+            class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          >
+            Повторить попытку
+          </button>
+        </div>
+
+        <div v-else-if="dialogsStore.dialogs.length > 0" class="divide-y divide-gray-200">
+          <button
+            v-for="dialog in dialogsStore.dialogs"
+            :key="dialog.dialogId"
+            @click="$emit('select', dialog.dialogId)"
+            class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
+            :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
+          >
+            <div class="flex-shrink-0">
+              <Avatar
+                :avatar="getDialogAvatar(dialog)"
+                :name="dialog.name || dialog.dialogName || 'Диалог'"
+                :userId="getDialogOtherUserId(dialog)"
+                :is-group="isGroupChat(dialog)"
+                size="md"
+                shape="circle"
+              />
+            </div>
+
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between mb-1">
+                <h3 class="font-semibold text-gray-900 truncate flex-1 flex items-center gap-2">
+                  <span
+                    v-if="isGroupChat(dialog)"
+                    class="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-medium flex-shrink-0"
+                    :class="getGroupBadgeClasses(dialog)"
+                    :title="getGroupBadgeLabel(dialog)"
+                    aria-hidden="true"
+                  >
+                    {{ getGroupBadgeIcon(dialog) }}
+                  </span>
+                  <span class="truncate">
+                    {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                  </span>
+                </h3>
+                <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
+                  {{ formatTime(dialog.lastMessageAt) }}
+                </span>
+              </div>
+
+              <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                {{ dialog.lastMessage.content }}
+              </p>
+            </div>
+
+            <div
+              v-if="dialog.unreadCount > 0"
+              class="absolute top-4 right-4 bg-primary-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium"
+            >
+              {{ dialog.unreadCount > 9 ? '9+' : dialog.unreadCount }}
+            </div>
+          </button>
+        </div>
+
+        <div v-else class="flex flex-col items-center justify-center p-8 text-gray-400">
+          <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <p>Нет диалогов</p>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
@@ -95,8 +321,87 @@ defineEmits<{
 
 const dialogsStore = useDialogsStore()
 const authStore = useAuthStore()
+const { isSearching, searchError, searchResults, lastSearchTerm } = storeToRefs(dialogsStore)
+
 const dialogAvatars = ref<Record<string, string | null>>({})
 const dialogOtherUsers = ref<Record<string, { userId: string; name: string }>>({})
+const searchTerm = ref(lastSearchTerm.value || '')
+const MIN_SEARCH_LENGTH = 2
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+const isSearchActive = computed(() => (searchTerm.value || '').trim().length >= MIN_SEARCH_LENGTH)
+const hasSearchResults = computed(() => {
+  const results = searchResults.value || { personal: [], groups: [], publicGroups: [] }
+  return (
+    results.personal.length > 0 ||
+    results.groups.length > 0 ||
+    results.publicGroups.length > 0
+  )
+})
+
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __chatSearchDebug: {
+      get term() {
+        return searchTerm.value
+      },
+      get isActive() {
+        return isSearchActive.value
+      },
+      get isSearching() {
+        return isSearching.value
+      },
+      get hasResults() {
+        return hasSearchResults.value
+      },
+      get results() {
+        return searchResults.value
+      },
+      get error() {
+        return searchError.value
+      }
+    }
+  })
+}
+
+watch(
+  () => searchTerm.value,
+  (value) => {
+    const trimmed = value.trim()
+
+    if (searchTimer) {
+      clearTimeout(searchTimer)
+      searchTimer = null
+    }
+
+    if (trimmed.length < MIN_SEARCH_LENGTH) {
+      dialogsStore.clearSearch()
+      return
+    }
+
+    searchTimer = setTimeout(() => {
+      void performSearch(trimmed)
+    }, 300)
+  }
+)
+
+onMounted(() => {
+  if (searchTerm.value.trim().length >= MIN_SEARCH_LENGTH) {
+    void performSearch(searchTerm.value.trim())
+  }
+})
+
+onUnmounted(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+})
+
+function clearSearchTerm() {
+  searchTerm.value = ''
+  dialogsStore.clearSearch()
+}
 
 function isActive(dialogId: string): boolean {
   return dialogsStore.currentDialog?.dialogId === dialogId
@@ -107,6 +412,20 @@ async function retryLoadDialogs() {
     await dialogsStore.fetchDialogs()
   } catch (error) {
     console.error('Failed to retry loading dialogs:', error)
+  }
+}
+
+async function performSearch(term: string) {
+  const trimmed = term.trim()
+  if (trimmed.length < MIN_SEARCH_LENGTH) {
+    dialogsStore.clearSearch()
+    return
+  }
+
+  try {
+    await dialogsStore.searchDialogs(trimmed)
+  } catch (error) {
+    console.error('Failed to search dialogs:', error)
   }
 }
 
@@ -150,6 +469,33 @@ function getDialogAvatar(dialog: Dialog): string | null {
 function isGroupChat(dialog: Dialog): boolean {
   const chatType = dialog.chatType || dialog.meta?.type
   return chatType === 'group'
+}
+
+function getGroupBadgeLabel(dialog: Dialog): string {
+  const groupType = dialog.meta?.groupType || dialog.meta?.visibility || 'private'
+  if (groupType === 'public') {
+    return 'Публичная группа'
+  }
+  if (groupType === 'private') {
+    return 'Приватная группа'
+  }
+  return 'Группа'
+}
+
+function getGroupBadgeIcon(dialog: Dialog): string {
+  const groupType = dialog.meta?.groupType || dialog.meta?.visibility || 'private'
+  return groupType === 'public' ? '🌐' : '🔒'
+}
+
+function getGroupBadgeClasses(dialog: Dialog): string {
+  const groupType = dialog.meta?.groupType || dialog.meta?.visibility || 'private'
+  if (groupType === 'public') {
+    return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+  }
+  if (groupType === 'private') {
+    return 'bg-blue-50 text-blue-700 border border-blue-200'
+  }
+  return 'bg-gray-100 text-gray-600 border border-gray-200'
 }
 
 async function loadDialogOtherUser(dialogId: string) {

@@ -35,6 +35,7 @@ export interface Dialog {
     type?: 'p2p' | 'group'
     [key: string]: any
   }
+  isPublic?: boolean
   members?: Array<{
     userId: string
     name?: string
@@ -128,6 +129,23 @@ export interface PaginatedResponse<T> {
     limit: number
     total: number
     pages: number
+  }
+}
+
+export interface DialogSearchResponse {
+  success: boolean
+  search: string
+  personal: {
+    data: Dialog[]
+    pagination: PaginatedResponse<Dialog>['pagination']
+  }
+  groups: {
+    data: Dialog[]
+    pagination: PaginatedResponse<Dialog>['pagination']
+  }
+  publicGroups: {
+    data: Dialog[]
+    pagination: PaginatedResponse<Dialog>['pagination']
   }
 }
 

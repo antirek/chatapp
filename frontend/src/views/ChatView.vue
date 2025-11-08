@@ -198,6 +198,7 @@ import PublicGroupsModal from '@/components/PublicGroupsModal.vue'
 import UserProfile from '@/components/UserProfile.vue'
 import Avatar from '@/components/Avatar.vue'
 import { useNotificationSound } from '@/composables/useNotificationSound'
+import { normalizeMessageType } from '@/utils/messageType'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -327,7 +328,10 @@ function handleNewMessage(message: any) {
   })
   
   // Play notification sound for messages from other users
-  if (isFromOtherUser) {
+  const normalizedType = normalizeMessageType(message.type, message.meta)
+  const isSystemMessage = normalizedType === 'system'
+
+  if (isFromOtherUser && !isSystemMessage) {
     playNotificationSound()
   }
   

@@ -6,7 +6,8 @@ import type {
   Message,
   SendMessageData,
   PaginatedResponse,
-  ApiResponse
+  ApiResponse,
+  DialogSearchResponse
 } from '@/types'
 
 class ApiService {
@@ -70,6 +71,19 @@ class ApiService {
     includeLastMessage?: boolean
   }): Promise<PaginatedResponse<Dialog>> {
     const { data } = await this.api.get('/dialogs', { params })
+    return data
+  }
+
+  async searchDialogs(params: {
+    search: string
+    p2pPage?: number
+    p2pLimit?: number
+    groupPage?: number
+    groupLimit?: number
+    publicPage?: number
+    publicLimit?: number
+  }): Promise<DialogSearchResponse> {
+    const { data } = await this.api.get('/dialogs/search', { params })
     return data
   }
 

@@ -2,12 +2,48 @@ import express from 'express';
 import Chat3Client from '../services/Chat3Client.js';
 import { authenticate } from '../middleware/auth.js';
 import { mapOutgoingMessageType } from '../utils/messageType.js';
+import { updateP2PSearchTokens } from '../utils/p2pSearchTokens.js';
 
 const router = express.Router();
 
 // All dialog routes require authentication
 router.use(authenticate);
 
+const MIN_SEARCH_LENGTH = 2;
+
+function createEmptyResult(page, limit) {
+  return {
+    data: [],
+    pagination: {
+      page,
+      limit,
+      total: 0,
+      pages: 0,
+    },
+  };
+}
+
+async function safeGetUserDialogs(userId, params) {
+  try {
+    return await Chat3Client.getUserDialogs(userId, params);
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return createEmptyResult(parseInt(params.page, 10) || 1, parseInt(params.limit, 10) || 0);
+    }
+    throw error;
+  }
+}
+
+async function safeGetDialogs(params) {
+  try {
+    return await Chat3Client.getDialogs(params);
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return createEmptyResult(parseInt(params.page, 10) || 1, parseInt(params.limit, 10) || 0);
+    }
+    throw error;
+  }
+}
 /**
  * Process P2P dialog: replace name and avatar with interlocutor's data
  */
@@ -121,6 +157,121 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/search', async (req, res) => {
+  const {
+    search,
+    p2pPage = 1,
+    p2pLimit = 10,
+    groupPage = 1,
+    groupLimit = 10,
+    publicPage = 1,
+    publicLimit = 10,
+  } = req.query;
+
+  const trimmedSearch = (search || '').trim();
+
+  if (!trimmedSearch || trimmedSearch.length < MIN_SEARCH_LENGTH) {
+    return res.status(400).json({
+      success: false,
+      error: `Search term must be at least ${MIN_SEARCH_LENGTH} characters`,
+    });
+  }
+
+  const currentUserId = req.user.userId;
+  const escaped = trimmedSearch.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const pattern = `.*${escaped}.*`;
+
+  const p2pFilter = `(meta.type,eq,p2p)&(meta.searchTokens,regex,"${pattern}")`;
+  const groupsFilter = `(meta.type,eq,group)&(name,regex,"${pattern}")`;
+  const publicFilter = `(meta.type,eq,group)&(meta.groupType,eq,public)&(member,ne,${currentUserId})&(name,regex,"${pattern}")`;
+
+  try {
+    const [p2pResult, groupResult, publicResult] = await Promise.all([
+      safeGetUserDialogs(currentUserId, {
+        page: parseInt(p2pPage, 10) || 1,
+        limit: parseInt(p2pLimit, 10) || 10,
+        filter: p2pFilter,
+        includeLastMessage: true,
+      }),
+      safeGetUserDialogs(currentUserId, {
+        page: parseInt(groupPage, 10) || 1,
+        limit: parseInt(groupLimit, 10) || 10,
+        filter: groupsFilter,
+        includeLastMessage: true,
+      }),
+      safeGetDialogs({
+        page: parseInt(publicPage, 10) || 1,
+        limit: parseInt(publicLimit, 10) || 10,
+        filter: publicFilter,
+        includeLastMessage: true,
+      }),
+    ]);
+
+    const processedPersonal = await Promise.all(
+      (p2pResult.data || []).map(async (dialog) => {
+        const processed = await processP2PDialog(dialog, currentUserId);
+        return {
+          ...processed,
+          chatType: 'p2p',
+        };
+      })
+    );
+
+    const processedGroups = (groupResult.data || []).map((dialog) => ({
+      ...dialog,
+      chatType: 'group',
+    }));
+
+    const processedPublic = (publicResult.data || []).map((dialog) => ({
+      ...dialog,
+      chatType: 'group',
+      meta: {
+        ...(dialog.meta || {}),
+        groupType: dialog.meta?.groupType || 'public',
+      },
+      isPublic: true,
+    }));
+
+    res.json({
+      success: true,
+      search: trimmedSearch,
+      personal: {
+        data: processedPersonal,
+        pagination: p2pResult.pagination || {
+          page: parseInt(p2pPage, 10) || 1,
+          limit: parseInt(p2pLimit, 10) || 10,
+          total: processedPersonal.length,
+          pages: processedPersonal.length ? 1 : 0,
+        },
+      },
+      groups: {
+        data: processedGroups,
+        pagination: groupResult.pagination || {
+          page: parseInt(groupPage, 10) || 1,
+          limit: parseInt(groupLimit, 10) || 10,
+          total: processedGroups.length,
+          pages: processedGroups.length ? 1 : 0,
+        },
+      },
+      publicGroups: {
+        data: processedPublic,
+        pagination: publicResult.pagination || {
+          page: parseInt(publicPage, 10) || 1,
+          limit: parseInt(publicLimit, 10) || 10,
+          total: processedPublic.length,
+          pages: processedPublic.length ? 1 : 0,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Dialog search failed:', error.message, error.response?.data || '');
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to search dialogs',
+    });
+  }
+});
+
 /**
  * POST /api/dialogs
  * Create new dialog
@@ -172,6 +323,9 @@ router.post('/', async (req, res) => {
                 dialogMemberIds.includes(currentUserId) && 
                 dialogMemberIds.includes(otherUserId)) {
               console.log(`✅ Found existing P2P dialog ${dialog.dialogId} between ${currentUserId} and ${otherUserId}`);
+              
+              // Ensure search tokens are up to date
+              await updateP2PSearchTokens(dialog.dialogId, currentUserId, otherUserId);
               
               // Process P2P dialog to replace name with interlocutor's name
               const processedDialog = await processP2PDialog(dialog, currentUserId);
@@ -236,6 +390,14 @@ router.post('/', async (req, res) => {
         console.log(`✅ Set groupType: ${groupType} for dialog ${dialogId}`);
       } catch (error) {
         console.warn(`Failed to set groupType meta tag for dialog ${dialogId}:`, error.message);
+      }
+    }
+
+    if (finalChatType === 'p2p' && memberIds.length === 1) {
+      try {
+        await updateP2PSearchTokens(dialogId, req.user.userId, memberIds[0]);
+      } catch (error) {
+        console.warn(`⚠️ Failed to update search tokens for dialog ${dialogId}:`, error.message);
       }
     }
 

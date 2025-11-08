@@ -2,13 +2,31 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
 import { normalizeMessageType } from '@/utils/messageType'
-import type { Dialog } from '@/types'
+import type { Dialog, DialogSearchResponse } from '@/types'
 
 export const useDialogsStore = defineStore('dialogs', () => {
   const dialogs = ref<Dialog[]>([])
   const currentDialog = ref<Dialog | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const isSearching = ref(false)
+  const searchError = ref<string | null>(null)
+  const lastSearchTerm = ref('')
+  const searchResults = ref<{
+    personal: Dialog[]
+    groups: Dialog[]
+    publicGroups: Dialog[]
+  }>({
+    personal: [],
+    groups: [],
+    publicGroups: []
+  })
+  const searchPagination = ref<{
+    personal?: DialogSearchResponse['personal']['pagination']
+    groups?: DialogSearchResponse['groups']['pagination']
+    publicGroups?: DialogSearchResponse['publicGroups']['pagination']
+  }>({})
+  const searchSequence = ref(0)
 
   async function fetchDialogs(params?: {
     page?: number
@@ -177,6 +195,76 @@ export const useDialogsStore = defineStore('dialogs', () => {
     }
   }
 
+  async function searchDialogs(search: string, options?: {
+    p2pPage?: number
+    p2pLimit?: number
+    groupPage?: number
+    groupLimit?: number
+    publicPage?: number
+    publicLimit?: number
+  }) {
+    const trimmed = search?.trim() || ''
+
+    if (trimmed.length < 2) {
+      clearSearch()
+      return {
+        search: trimmed,
+        personal: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } },
+        groups: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } },
+        publicGroups: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } }
+      }
+    }
+
+    isSearching.value = true
+    searchError.value = null
+    const sequenceId = ++searchSequence.value
+
+    try {
+      const response = await api.searchDialogs({
+        search: trimmed,
+        ...options
+      })
+
+      if (sequenceId === searchSequence.value) {
+        searchResults.value = {
+          personal: response.personal?.data || [],
+          groups: response.groups?.data || [],
+          publicGroups: response.publicGroups?.data || []
+        }
+
+        searchPagination.value = {
+          personal: response.personal?.pagination,
+          groups: response.groups?.pagination,
+          publicGroups: response.publicGroups?.pagination
+        }
+
+        lastSearchTerm.value = response.search || trimmed
+      }
+
+      return response
+    } catch (err: any) {
+      searchError.value = err.response?.data?.error || err.message || 'Search failed'
+      throw err
+    } finally {
+      if (sequenceId === searchSequence.value) {
+        isSearching.value = false
+      }
+    }
+  }
+
+  function clearSearch() {
+    searchSequence.value++
+    searchResults.value = {
+      personal: [],
+      groups: [],
+      publicGroups: []
+    }
+    searchPagination.value = {}
+    lastSearchTerm.value = ''
+    searchError.value = null
+    isSearching.value = false
+  }
+
   return {
     dialogs,
     currentDialog,
@@ -187,7 +275,14 @@ export const useDialogsStore = defineStore('dialogs', () => {
     selectDialog,
     updateDialogUnreadCount,
     incrementUnreadCount,
-    updateLastMessage
+    updateLastMessage,
+    isSearching,
+    searchError,
+    searchResults,
+    searchPagination,
+    lastSearchTerm,
+    searchDialogs,
+    clearSearch
   }
 })
 
