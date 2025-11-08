@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col bg-white">
+  <div class="flex-1 flex flex-col bg-white min-h-0">
     <div class="p-3 border-b border-gray-200">
       <div class="relative">
         <input
@@ -24,7 +24,7 @@
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto">
+    <div class="flex-1 overflow-y-auto min-h-0">
       <!-- Search Mode -->
       <div v-if="isSearchActive" class="flex-1">
         <div v-if="isSearching" class="flex items-center justify-center p-8 text-gray-400">
