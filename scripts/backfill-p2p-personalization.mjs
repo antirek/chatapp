@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import Chat3Client from '../backend/src/services/Chat3Client.js';
-import { updateP2PSearchTokens } from '../backend/src/utils/p2pSearchTokens.js';
+import { updateP2PPersonalization } from '../backend/src/utils/p2pPersonalization.js';
 
 async function fetchP2PDialogs(page, limit) {
   const filter = '(meta.type,eq,p2p)';
@@ -8,7 +8,7 @@ async function fetchP2PDialogs(page, limit) {
   return response;
 }
 
-async function ensureTokensForDialog(dialog) {
+async function ensurePersonalizationForDialog(dialog) {
   const dialogId = dialog.dialogId || dialog._id;
 
   if (!dialog.members || dialog.members.length < 2) {
@@ -23,7 +23,7 @@ async function ensureTokensForDialog(dialog) {
     return;
   }
 
-  await updateP2PSearchTokens(dialogId, memberIds[0], memberIds[1]);
+  await updateP2PPersonalization(dialogId, memberIds[0], memberIds[1]);
 }
 
 async function main() {
@@ -32,7 +32,7 @@ async function main() {
   let pages = 1;
   let processed = 0;
 
-  console.log('🚀 Starting backfill of P2P search tokens');
+  console.log('🚀 Starting backfill of P2P personalization meta');
 
   while (page <= pages) {
     try {
@@ -45,10 +45,10 @@ async function main() {
 
       for (const dialog of dialogs) {
         try {
-          await ensureTokensForDialog(dialog);
+          await ensurePersonalizationForDialog(dialog);
           processed += 1;
         } catch (error) {
-          console.error(`❌ Failed to update tokens for dialog ${dialog.dialogId}:`, error.message);
+          console.error(`❌ Failed to update personalization for dialog ${dialog.dialogId}:`, error.message);
         }
       }
 

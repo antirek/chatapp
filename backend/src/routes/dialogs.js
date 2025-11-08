@@ -2,7 +2,7 @@ import express from 'express';
 import Chat3Client from '../services/Chat3Client.js';
 import { authenticate } from '../middleware/auth.js';
 import { mapOutgoingMessageType } from '../utils/messageType.js';
-import { updateP2PSearchTokens } from '../utils/p2pSearchTokens.js';
+import { updateP2PPersonalization } from '../utils/p2pPersonalization.js';
 
 const router = express.Router();
 
@@ -11,7 +11,28 @@ router.use(authenticate);
 
 const MIN_SEARCH_LENGTH = 2;
 
-function createEmptyResult(page, limit) {
+function extractMetaValue(meta, key) {
+  if (!meta || !key) {
+    return undefined;
+  }
+
+  const raw = meta[key];
+  if (raw == null) {
+    return undefined;
+  }
+
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    return raw.value;
+  }
+
+  return raw;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+  function createEmptyResult(page, limit) {
   return {
     data: [],
     pagination: {
@@ -52,6 +73,23 @@ async function processP2PDialog(dialog, currentUserId) {
   
   if (dialogType !== 'p2p') {
     return dialog;
+  }
+
+  const nameKey = `p2pDialogNameFor${currentUserId}`;
+  const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
+  const fallbackName = extractMetaValue(dialog.meta, `nameFor_${currentUserId}`);
+  const fallbackAvatar = extractMetaValue(dialog.meta, `avatarFor_${currentUserId}`);
+
+  const personalizedName = extractMetaValue(dialog.meta, nameKey) || fallbackName;
+  const personalizedAvatar = extractMetaValue(dialog.meta, avatarKey) || fallbackAvatar;
+
+  if (personalizedName || personalizedAvatar) {
+    return {
+      ...dialog,
+      name: personalizedName || dialog.name || dialog.dialogName || dialog.dialogId,
+      avatar: personalizedAvatar ?? dialog.avatar ?? null,
+      chatType: 'p2p',
+    };
   }
 
   try {
@@ -178,10 +216,11 @@ router.get('/search', async (req, res) => {
   }
 
   const currentUserId = req.user.userId;
-  const escaped = trimmedSearch.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escaped = escapeRegex(trimmedSearch);
+  const nameMetaKey = `p2pDialogNameFor${currentUserId}`;
   const pattern = `.*${escaped}.*`;
 
-  const p2pFilter = `(meta.type,eq,p2p)&(meta.searchTokens,regex,"${pattern}")`;
+  const p2pFilter = `(meta.type,eq,p2p)&(meta.${nameMetaKey},regex,"${pattern}")`;
   const groupsFilter = `(meta.type,eq,group)&(name,regex,"${pattern}")`;
   const publicFilter = `(meta.type,eq,group)&(meta.groupType,eq,public)&(member,ne,${currentUserId})&(name,regex,"${pattern}")`;
 
@@ -325,7 +364,7 @@ router.post('/', async (req, res) => {
               console.log(`✅ Found existing P2P dialog ${dialog.dialogId} between ${currentUserId} and ${otherUserId}`);
               
               // Ensure search tokens are up to date
-              await updateP2PSearchTokens(dialog.dialogId, currentUserId, otherUserId);
+              await updateP2PPersonalization(dialog.dialogId, currentUserId, otherUserId);
               
               // Process P2P dialog to replace name with interlocutor's name
               const processedDialog = await processP2PDialog(dialog, currentUserId);
@@ -395,7 +434,7 @@ router.post('/', async (req, res) => {
 
     if (finalChatType === 'p2p' && memberIds.length === 1) {
       try {
-        await updateP2PSearchTokens(dialogId, req.user.userId, memberIds[0]);
+        await updateP2PPersonalization(dialogId, req.user.userId, memberIds[0]);
       } catch (error) {
         console.warn(`⚠️ Failed to update search tokens for dialog ${dialogId}:`, error.message);
       }
