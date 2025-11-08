@@ -59,7 +59,7 @@
                   <Avatar
                     :avatar="getDialogAvatar(dialog)"
                     :name="dialog.name || dialog.dialogName || 'Диалог'"
-                    :userId="getDialogOtherUserId(dialog)"
+                    :userId="dialog.dialogId"
                     :is-group="isGroupChat(dialog)"
                     size="md"
                     shape="circle"
@@ -108,7 +108,7 @@
                   <Avatar
                     :avatar="getDialogAvatar(dialog)"
                     :name="dialog.name || dialog.dialogName || 'Диалог'"
-                    :userId="getDialogOtherUserId(dialog)"
+                    :userId="dialog.dialogId"
                     :is-group="isGroupChat(dialog)"
                     size="md"
                     shape="circle"
@@ -165,7 +165,7 @@
                   <Avatar
                     :avatar="getDialogAvatar(dialog)"
                     :name="dialog.name || dialog.dialogName || 'Диалог'"
-                    :userId="getDialogOtherUserId(dialog)"
+                    :userId="dialog.dialogId"
                     :is-group="isGroupChat(dialog)"
                     size="md"
                     shape="circle"
@@ -253,7 +253,7 @@
               <Avatar
                 :avatar="getDialogAvatar(dialog)"
                 :name="dialog.name || dialog.dialogName || 'Диалог'"
-                :userId="getDialogOtherUserId(dialog)"
+                :userId="dialog.dialogId"
                 :is-group="isGroupChat(dialog)"
                 size="md"
                 shape="circle"
@@ -311,7 +311,6 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useAuthStore } from '@/stores/auth'
-import api from '@/services/api'
 import Avatar from './Avatar.vue'
 import type { Dialog } from '@/types'
 
@@ -323,8 +322,6 @@ const dialogsStore = useDialogsStore()
 const authStore = useAuthStore()
 const { isSearching, searchError, searchResults, lastSearchTerm } = storeToRefs(dialogsStore)
 
-const dialogAvatars = ref<Record<string, string | null>>({})
-const dialogOtherUsers = ref<Record<string, { userId: string; name: string }>>({})
 const searchTerm = ref(lastSearchTerm.value || '')
 const MIN_SEARCH_LENGTH = 2
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -429,41 +426,19 @@ async function performSearch(term: string) {
   }
 }
 
-function getDialogOtherUserId(dialog: Dialog): string {
-  // Try to get other user ID from cache
-  if (dialogOtherUsers.value[dialog.dialogId]) {
-    return dialogOtherUsers.value[dialog.dialogId].userId
-  }
-  
-  // Try to get from last message sender
-  if (dialog.lastMessage?.senderId && dialog.lastMessage.senderId !== authStore.user?.userId) {
-    return dialog.lastMessage.senderId
-  }
-  
-  // Load dialog members to find other user
-  loadDialogOtherUser(dialog.dialogId)
-  
-  return ''
-}
-
 function getDialogAvatar(dialog: Dialog): string | null {
   // For group chats, return null to show default group icon
   if (isGroupChat(dialog)) {
     return null
   }
   
-  const otherUserId = getDialogOtherUserId(dialog)
-  if (!otherUserId) return null
-  
-  // Check cache
-  if (dialogAvatars.value[otherUserId] !== undefined) {
-    return dialogAvatars.value[otherUserId]
+  const currentUserId = authStore.user?.userId
+  if (!currentUserId) {
+    return dialog.avatar || null
   }
-  
-  // Load avatar
-  loadUserAvatar(otherUserId)
-  
-  return null
+
+  const metaKey = `p2pDialogAvatarFor${currentUserId}`
+  return dialog.avatar || dialog.meta?.[metaKey] || null
 }
 
 function isGroupChat(dialog: Dialog): boolean {
@@ -496,52 +471,6 @@ function getGroupBadgeClasses(dialog: Dialog): string {
     return 'bg-blue-50 text-blue-700 border border-blue-200'
   }
   return 'bg-gray-100 text-gray-600 border border-gray-200'
-}
-
-async function loadDialogOtherUser(dialogId: string) {
-  // Skip if already loading
-  if (dialogOtherUsers.value[dialogId]) {
-    return
-  }
-  
-  try {
-    const response = await api.getDialogMembers(dialogId)
-    if (response.success && response.data) {
-      const members = response.data
-      const otherMember = members.find((m: any) => m.userId !== authStore.user?.userId)
-      
-      if (otherMember && otherMember.userId) {
-        dialogOtherUsers.value[dialogId] = {
-          userId: otherMember.userId,
-          name: otherMember.name || ''
-        }
-        
-        // Load avatar for this user
-        loadUserAvatar(otherMember.userId)
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load dialog other user:', dialogId, error)
-  }
-}
-
-async function loadUserAvatar(userId: string) {
-  // Skip if already loading or cached
-  if (dialogAvatars.value[userId] !== undefined) {
-    return
-  }
-  
-  try {
-    const response = await api.getUser(userId)
-    if (response.success && response.data) {
-      const avatar = response.data.avatar || null
-      dialogAvatars.value[userId] = avatar
-    }
-  } catch (error) {
-    // If user not found or error, cache null
-    dialogAvatars.value[userId] = null
-    console.error('Failed to load user avatar:', userId, error)
-  }
 }
 
 function formatTime(timestamp: string | number): string {

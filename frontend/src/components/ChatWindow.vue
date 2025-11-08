@@ -236,6 +236,21 @@ const isAddMembersOpen = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
 const existingMemberIds = ref<string[]>([])
+const currentUserId = computed(() => authStore.user?.userId || '')
+const isP2PDialog = computed(() => {
+  const chatType = props.dialog.chatType || props.dialog.meta?.type
+  return chatType === 'p2p'
+})
+const p2pNameForCurrent = computed(() => {
+  if (!isP2PDialog.value || !currentUserId.value) return undefined
+  const key = `p2pDialogNameFor${currentUserId.value}`
+  return props.dialog.meta?.[key] || props.dialog.name || props.dialog.dialogName
+})
+const p2pAvatarForCurrent = computed(() => {
+  if (!isP2PDialog.value || !currentUserId.value) return undefined
+  const key = `p2pDialogAvatarFor${currentUserId.value}`
+  return props.dialog.meta?.[key] || props.dialog.avatar || null
+})
 
 // Check if current dialog is a group chat
 const isGroupChat = computed(() => {
@@ -251,6 +266,7 @@ const typingUsersText = computed(() => {
 
 // Load other user info and current user avatar on mount
 onMounted(async () => {
+  syncOtherUserFromMeta()
   await Promise.all([
     // Only load other user info for P2P chats
     isGroupChat.value ? Promise.resolve() : loadOtherUserInfo(),
@@ -458,6 +474,10 @@ function getSenderName(message: Message): string {
     return otherUser.value.name
   }
   
+  if (isP2PDialog.value && p2pNameForCurrent.value) {
+    return p2pNameForCurrent.value
+  }
+
   // Fallback: Show senderId if name is not available
   return message.senderId
 }
@@ -483,9 +503,6 @@ function getSenderAvatar(message: Message): string | null {
       return message.sender.avatar
     }
     
-    // Load avatar from API if not in cache
-    loadUserAvatar(message.senderId)
-    
     return null
   }
   
@@ -502,29 +519,13 @@ function getSenderAvatar(message: Message): string | null {
     return otherUser.value.avatar
   }
   
-  // Load avatar from API if not in cache
-  loadUserAvatar(message.senderId)
+  if (isP2PDialog.value) {
+    const avatar = p2pAvatarForCurrent.value ?? null
+    userAvatars.value[message.senderId] = avatar
+    return avatar ?? null
+  }
   
   return null
-}
-
-async function loadUserAvatar(userId: string) {
-  // Skip if already loading or cached
-  if (userAvatars.value[userId] !== undefined) {
-    return
-  }
-  
-  try {
-    const response = await api.getUser(userId)
-    if (response.success && response.data) {
-      const avatar = response.data.avatar || null
-      userAvatars.value[userId] = avatar
-    }
-  } catch (error) {
-    // If user not found or error, cache null
-    userAvatars.value[userId] = null
-    console.error('Failed to load user avatar:', userId, error)
-  }
 }
 
 function formatTime(timestamp: string | number): string {
@@ -610,15 +611,41 @@ async function loadOtherUserInfo() {
       const otherMember = members.find((m: any) => m.userId !== authStore.user?.userId)
       
       if (otherMember && otherMember.userId) {
-        // Get full user info
-        const userResponse = await api.getUser(otherMember.userId)
-        if (userResponse.success && userResponse.data) {
-          otherUser.value = userResponse.data
-          
-          // Cache avatar
-          if (userResponse.data.avatar) {
-            userAvatars.value[otherMember.userId] = userResponse.data.avatar
+        syncOtherUserFromMeta({ userId: otherMember.userId })
+
+        if (!otherUser.value) {
+          otherUser.value = {
+            userId: otherMember.userId,
+            name: otherMember.name || p2pNameForCurrent.value || otherMember.userId,
+            phone: otherMember.phone || '',
+            avatar: otherMember.avatar || p2pAvatarForCurrent.value || null
           }
+        } else {
+          otherUser.value = {
+            userId: otherMember.userId,
+            name: otherUser.value.name || otherMember.name || otherMember.userId,
+            phone: otherUser.value.phone || otherMember.phone || '',
+            avatar: otherUser.value.avatar || otherMember.avatar || null
+          }
+        }
+
+        if (otherUser.value.avatar !== undefined) {
+          userAvatars.value[otherMember.userId] = otherUser.value.avatar
+        }
+
+        try {
+          const userResponse = await api.getUser(otherMember.userId)
+          if (userResponse.success && userResponse.data) {
+            otherUser.value = {
+              userId: userResponse.data.userId || otherMember.userId,
+              name: userResponse.data.name || otherUser.value.name || otherMember.userId,
+              phone: userResponse.data.phone || otherUser.value.phone || '',
+              avatar: userResponse.data.avatar || otherUser.value.avatar || null
+            }
+            userAvatars.value[otherMember.userId] = otherUser.value.avatar
+          }
+        } catch (error) {
+          console.warn('Failed to load detailed user info:', error)
         }
       }
     }
@@ -685,6 +712,39 @@ function handleLeftGroup() {
   // Emit event to parent (ChatView) to clear current dialog
   emit('left-group')
 }
+
+function syncOtherUserFromMeta(partial?: { userId?: string }) {
+  if (!isP2PDialog.value) {
+    return
+  }
+
+  const nameFromMeta = p2pNameForCurrent.value
+  const avatarFromMeta = p2pAvatarForCurrent.value ?? null
+
+  if (!nameFromMeta && avatarFromMeta === undefined) {
+    return
+  }
+
+  const userId = partial?.userId || otherUser.value?.userId || ''
+
+  otherUser.value = {
+    userId,
+    name: nameFromMeta || otherUser.value?.name || userId,
+    phone: otherUser.value?.phone || '',
+    avatar: avatarFromMeta
+  }
+
+  if (userId) {
+    userAvatars.value[userId] = avatarFromMeta
+  }
+}
+
+watch(
+  () => [props.dialog.dialogId, p2pNameForCurrent.value, p2pAvatarForCurrent.value],
+  () => {
+    syncOtherUserFromMeta()
+  }
+)
 </script>
 
 
