@@ -53,6 +53,42 @@
           <div class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
             Управляйте участниками через кнопку ниже. Используйте поиск в форме добавления, чтобы найти нужных людей.
           </div>
+
+          <div class="space-y-3">
+            <div class="text-sm font-semibold text-gray-700">Владелец и администраторы</div>
+
+            <div v-if="isLoadingInfo && !hasPrivilegedMembers" class="text-sm text-gray-500 flex items-center space-x-2">
+              <svg class="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Загрузка...</span>
+            </div>
+
+            <div v-else-if="hasPrivilegedMembers" class="space-y-3">
+              <div
+                v-for="member in privilegedMembers"
+                :key="member.userId"
+                class="flex items-center space-x-3 rounded-lg border border-gray-200 bg-white/70 px-3 py-2"
+              >
+                <Avatar
+                  :avatar="member.avatar"
+                  :name="member.name"
+                  :userId="member.userId"
+                  size="sm"
+                  shape="circle"
+                />
+                <div class="flex-1">
+                  <div class="font-medium text-gray-900">{{ member.name }}</div>
+                  <div class="text-xs text-gray-500">{{ getRoleLabel(member.role) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="text-sm text-gray-500">
+              Владелец и администраторы не назначены.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -60,10 +96,14 @@
       <div class="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
         <button
           @click="openAddMembers"
-          class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          :disabled="!isCurrentUserOwner"
+          class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Добавить участников
         </button>
+        <p v-if="!isCurrentUserOwner" class="text-xs text-gray-500 text-center">
+          Добавлять новых участников может только владелец группы.
+        </p>
         <button
           v-if="canLeaveGroup"
           @click="leaveGroup"
@@ -89,7 +129,22 @@ import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogsStore } from '@/stores/dialogs'
+import Avatar from '@/components/Avatar.vue'
 import type { Dialog } from '@/types'
+
+interface MemberMeta {
+  userId: string
+  name?: string
+  avatar?: string | null
+  role?: string | null
+}
+
+interface PrivilegedMember {
+  userId: string
+  name: string
+  avatar: string | null
+  role: string | null
+}
 
 const props = defineProps<{
   isOpen: boolean
@@ -109,6 +164,7 @@ const totalMembers = ref<number | null>(null)
 const isLoadingInfo = ref(false)
 const isLeavingGroup = ref(false)
 const currentUserRole = ref<string | null>(null)
+const privilegedMembers = ref<PrivilegedMember[]>([])
 
 const currentUserMember = computed(() => {
   if (!authStore.user?.userId || !currentUserRole.value) {
@@ -124,6 +180,8 @@ const currentUserMember = computed(() => {
 const isCurrentUserOwner = computed(() => currentUserMember.value?.role === 'owner')
 
 const canLeaveGroup = computed(() => currentUserMember.value !== null && !isCurrentUserOwner.value)
+
+const hasPrivilegedMembers = computed(() => privilegedMembers.value.length > 0)
 
 const totalMembersLabel = computed(() => {
   if (isLoadingInfo.value) {
@@ -143,6 +201,7 @@ watch(() => props.isOpen, (newValue) => {
   } else {
     totalMembers.value = null
     currentUserRole.value = null
+    privilegedMembers.value = []
   }
 })
 
@@ -155,7 +214,7 @@ async function loadMembersInfo() {
     const response = await api.getDialogMembers(props.dialog.dialogId)
 
     if (response.success && Array.isArray(response.data)) {
-      const members = response.data as Array<{ userId: string; role?: string | null }>
+      const members = response.data as MemberMeta[]
       totalMembers.value = members.length
 
       const currentUserId = authStore.user?.userId
@@ -165,14 +224,49 @@ async function loadMembersInfo() {
       } else {
         currentUserRole.value = null
       }
+
+      const privileged = members.filter(member => {
+        const normalizedRole = (member.role || '').toLowerCase()
+        return normalizedRole === 'owner' || normalizedRole === 'admin'
+      })
+
+      const enrichedPrivileged = await Promise.all(
+        privileged.map(async (member) => {
+          let name = member.name || ''
+          let avatar = member.avatar ?? null
+
+          if (!name || !avatar) {
+            try {
+              const userResponse = await api.getUser(member.userId)
+              if (userResponse.success && userResponse.data) {
+                name = userResponse.data.name || name
+                avatar = userResponse.data.avatar ?? avatar ?? null
+              }
+            } catch (userError) {
+              console.warn('Failed to enrich privileged member info:', userError)
+            }
+          }
+
+          return {
+            userId: member.userId,
+            name: name || member.userId,
+            avatar,
+            role: member.role || null,
+          } as PrivilegedMember
+        })
+      )
+
+      privilegedMembers.value = enrichedPrivileged
     } else {
       totalMembers.value = null
       currentUserRole.value = null
+      privilegedMembers.value = []
     }
   } catch (error) {
     console.error('Failed to load members info:', error)
     totalMembers.value = null
     currentUserRole.value = null
+    privilegedMembers.value = []
   } finally {
     isLoadingInfo.value = false
   }
@@ -208,6 +302,22 @@ async function leaveGroup() {
   } finally {
     isLeavingGroup.value = false
   }
+}
+
+function getRoleLabel(role: string | null): string {
+  if (!role) {
+    return 'Участник'
+  }
+
+  const normalized = role.toLowerCase()
+  if (normalized === 'owner') {
+    return 'Владелец'
+  }
+  if (normalized === 'admin') {
+    return 'Администратор'
+  }
+
+  return role
 }
 </script>
 
