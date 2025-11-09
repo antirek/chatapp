@@ -12,8 +12,22 @@ async function ensurePersonalizationForDialog(dialog) {
   const dialogId = dialog.dialogId || dialog._id;
 
   if (!dialog.members || dialog.members.length < 2) {
-    const fullDialog = await Chat3Client.getDialog(dialogId);
-    dialog.members = (fullDialog.data || fullDialog).members || [];
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 10 });
+    if (Array.isArray(membersResponse?.data?.data)) {
+      dialog.members = membersResponse.data.data;
+    } else if (Array.isArray(membersResponse?.data)) {
+      dialog.members = membersResponse.data;
+    } else if (Array.isArray(membersResponse?.members)) {
+      dialog.members = membersResponse.members;
+    } else if (Array.isArray(membersResponse?.results)) {
+      dialog.members = membersResponse.results;
+    } else if (Array.isArray(membersResponse?.items)) {
+      dialog.members = membersResponse.items;
+    } else if (Array.isArray(membersResponse)) {
+      dialog.members = membersResponse;
+    } else {
+      dialog.members = [];
+    }
   }
 
   const memberIds = dialog.members.map((member) => member.userId).filter(Boolean);

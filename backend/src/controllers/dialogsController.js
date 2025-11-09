@@ -41,6 +41,50 @@ function createEmptyResult(page, limit) {
   };
 }
 
+function extractMembersFromResponse(response) {
+  if (!response) {
+    return [];
+  }
+
+  if (Array.isArray(response.data?.data)) {
+    return response.data.data;
+  }
+
+  if (Array.isArray(response?.data?.results)) {
+    return response.data.results;
+  }
+
+  if (Array.isArray(response?.data?.items)) {
+    return response.data.items;
+  }
+
+  if (Array.isArray(response.data)) {
+    return response.data;
+  }
+
+  if (Array.isArray(response.members)) {
+    return response.members;
+  }
+
+  if (Array.isArray(response.results)) {
+    return response.results;
+  }
+
+  if (Array.isArray(response.items)) {
+    return response.items;
+  }
+
+  if (Array.isArray(response.list)) {
+    return response.list;
+  }
+
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  return [];
+}
+
 export async function resolveUserName(userId, fallbackName) {
   try {
     const profile = await getP2PUserProfile(userId);
@@ -89,10 +133,12 @@ async function ensureP2PMeta(dialog, currentUserId) {
 
   if (members.length === 0) {
     try {
-      const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
-      members = (fullDialog.data || fullDialog).members || [];
+      const membersResponse = await Chat3Client.getDialogMembers(dialog.dialogId, {
+        limit: 50,
+      });
+      members = extractMembersFromResponse(membersResponse);
     } catch (error) {
-      console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
+      console.warn(`Failed to get members for dialog ${dialog.dialogId}:`, error.message);
       return { name, avatar };
     }
   }
@@ -443,8 +489,10 @@ export async function createDialog(req, res) {
       if (userDialogs.data && userDialogs.data.length > 0) {
         for (const dialog of userDialogs.data) {
           try {
-            const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
-            const members = (fullDialog.data || fullDialog).members || [];
+            const membersResponse = await Chat3Client.getDialogMembers(dialog.dialogId, {
+              limit: 10,
+            });
+            const members = extractMembersFromResponse(membersResponse);
 
             const dialogMemberIds = members.map((m) => m.userId);
             if (
@@ -644,8 +692,8 @@ export async function joinPublicDialog(req, res) {
       });
     }
 
-    const dialogData = dialog.data;
-    const members = dialogData?.members || [];
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 200 });
+    const members = extractMembersFromResponse(membersResponse);
     const isMember = members.some((member) => member.userId === currentUserId);
 
     console.log(`🔍 Checking membership for user ${currentUserId} in dialog ${dialogId}`);
@@ -753,9 +801,8 @@ export async function deleteDialog(req, res) {
 export async function getDialogMembers(req, res) {
   try {
     const { dialogId } = req.params;
-    const dialog = await Chat3Client.getDialog(dialogId);
-
-    const members = dialog.data.members || [];
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, req.query || {});
+    const members = extractMembersFromResponse(membersResponse);
 
     const membersWithRoles = await Promise.all(
       members.map(async (member) => {

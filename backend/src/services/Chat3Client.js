@@ -51,8 +51,16 @@ class Chat3Client {
   /**
    * Get dialog by ID
    */
-  async getDialog(dialogId) {
-    const response = await this.client.get(`/dialogs/${dialogId}`);
+  async getDialog(dialogId, params = {}) {
+    const response = await this.client.get(`/dialogs/${dialogId}`, { params });
+    return response.data;
+  }
+
+  /**
+   * Get dialog members list
+   */
+  async getDialogMembers(dialogId, params = {}) {
+    const response = await this.client.get(`/dialogs/${dialogId}/members`, { params });
     return response.data;
   }
 
@@ -166,7 +174,7 @@ class Chat3Client {
    * Send typing indicator for user in dialog
    */
   async sendTypingSignal(dialogId, userId) {
-    const response = await this.client.post(`/dialogs/${dialogId}/user/${userId}/typing`);
+    const response = await this.client.post(`/dialogs/${dialogId}/member/${userId}/typing`);
     return {
       status: response.status,
       data: response.data,
