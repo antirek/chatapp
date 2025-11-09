@@ -31,78 +31,28 @@
         </div>
       </div>
 
-      <!-- Members List -->
+      <!-- Group Stats -->
       <div class="flex-1 overflow-y-auto border-t border-gray-200">
-        <div class="p-4 border-b border-gray-200 bg-gray-50">
-          <h3 class="text-sm font-semibold text-gray-700">Участники ({{ totalMembers }})</h3>
-        </div>
-
-        <!-- Loading -->
-        <div v-if="isLoading" class="flex items-center justify-center p-8">
-          <div class="text-gray-400">Загрузка участников...</div>
-        </div>
-
-        <!-- Members -->
-        <div v-else-if="members.length > 0" class="divide-y divide-gray-200">
-          <div
-            v-for="member in members"
-            :key="member.userId"
-            class="p-4 flex items-center space-x-3 hover:bg-gray-50 transition-colors"
-          >
-            <!-- Avatar -->
-            <Avatar
-              :avatar="member.avatar"
-              :name="member.name || member.userId"
-              :userId="member.userId"
-              size="md"
-              shape="circle"
-            />
-
-            <!-- Info -->
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center space-x-2">
-                <div class="font-medium text-gray-900 truncate">
-                  {{ member.name || member.userId }}
-                </div>
-                <span
-                  v-if="member.role === 'owner'"
-                  class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
-                  title="Владелец группы"
-                >
-                  Owner
-                </span>
-              </div>
-              <div v-if="member.phone" class="text-sm text-gray-500 truncate">
-                {{ formatPhone(member.phone) }}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Empty State -->
-        <div v-else class="flex flex-col items-center justify-center p-8 text-gray-400">
-          <svg class="w-16 h-16 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-          </svg>
-          <p>Нет участников</p>
-        </div>
-
-        <!-- Pagination -->
-        <div v-if="hasMorePages" class="p-4 border-t border-gray-200 bg-gray-50">
-          <button
-            @click="loadMore"
-            :disabled="isLoadingMore"
-            class="w-full px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
-              <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+        <div class="p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="text-sm font-semibold text-gray-700">Участники</div>
+            <div class="text-sm text-gray-600 flex items-center space-x-2">
+              <svg
+                v-if="isLoadingInfo"
+                class="animate-spin h-4 w-4 text-gray-400"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span>Загрузка...</span>
-            </span>
-            <span v-else>Загрузить еще</span>
-          </button>
+              <span v-else>{{ totalMembersLabel }}</span>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+            Управляйте участниками через кнопку ниже. Используйте поиск в форме добавления, чтобы найти нужных людей.
+          </div>
         </div>
       </div>
 
@@ -139,17 +89,7 @@ import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogsStore } from '@/stores/dialogs'
-import Avatar from '@/components/Avatar.vue'
 import type { Dialog } from '@/types'
-
-interface Member {
-  userId: string
-  name?: string
-  phone?: string
-  avatar?: string | null
-  role?: string | null
-  [key: string]: any
-}
 
 const props = defineProps<{
   isOpen: boolean
@@ -165,112 +105,76 @@ const emit = defineEmits<{
 const authStore = useAuthStore()
 const dialogsStore = useDialogsStore()
 
-const members = ref<Member[]>([])
-const isLoading = ref(false)
-const isLoadingMore = ref(false)
+const totalMembers = ref<number | null>(null)
+const isLoadingInfo = ref(false)
 const isLeavingGroup = ref(false)
-const currentPage = ref(1)
-const totalMembers = ref(0)
-const hasMorePages = ref(false)
-const limit = 20
+const currentUserRole = ref<string | null>(null)
 
 const currentUserMember = computed(() => {
-  if (!authStore.user?.userId) return null
-  return members.value.find(m => m.userId === authStore.user?.userId)
+  if (!authStore.user?.userId || !currentUserRole.value) {
+    return null
+  }
+
+  return {
+    userId: authStore.user.userId,
+    role: currentUserRole.value
+  }
 })
 
-const isCurrentUserOwner = computed(() => {
-  return currentUserMember.value?.role === 'owner'
+const isCurrentUserOwner = computed(() => currentUserMember.value?.role === 'owner')
+
+const canLeaveGroup = computed(() => currentUserMember.value !== null && !isCurrentUserOwner.value)
+
+const totalMembersLabel = computed(() => {
+  if (isLoadingInfo.value) {
+    return '—'
+  }
+
+  if (typeof totalMembers.value === 'number') {
+    return totalMembers.value
+  }
+
+  return '—'
 })
 
-const canLeaveGroup = computed(() => {
-  return !isCurrentUserOwner.value && currentUserMember.value !== null
-})
-
-// Load members on open
 watch(() => props.isOpen, (newValue) => {
   if (newValue && props.dialog) {
-    loadMembers(true)
+    loadMembersInfo()
   } else {
-    // Reset on close
-    members.value = []
-    currentPage.value = 1
-    totalMembers.value = 0
-    hasMorePages.value = false
+    totalMembers.value = null
+    currentUserRole.value = null
   }
 })
 
-async function loadMembers(reset = false) {
+async function loadMembersInfo() {
   if (!props.dialog) return
 
-  if (reset) {
-    currentPage.value = 1
-    members.value = []
-    isLoading.value = true
-  } else {
-    isLoadingMore.value = true
-  }
+  isLoadingInfo.value = true
 
   try {
     const response = await api.getDialogMembers(props.dialog.dialogId)
-    
-    if (response.success && response.data) {
-      const allMembers = response.data as Member[]
-      
-      // Calculate pagination
-      const startIndex = (currentPage.value - 1) * limit
-      const endIndex = startIndex + limit
-      const pageMembers = allMembers.slice(startIndex, endIndex)
-      
-      // Get full user info for each member (with avatars) - only for current page
-      const membersWithInfo = await Promise.all(
-        pageMembers.map(async (member) => {
-          try {
-            const userResponse = await api.getUser(member.userId)
-            if (userResponse.success && userResponse.data) {
-              return {
-                userId: member.userId,
-                name: userResponse.data.name || member.name,
-                phone: userResponse.data.phone || member.phone,
-                avatar: userResponse.data.avatar || member.avatar || null,
-                role: member.role || null, // Preserve role from API response
-              }
-            }
-          } catch (error) {
-            console.warn(`Failed to get user info for ${member.userId}:`, error)
-          }
-          
-          return {
-            userId: member.userId,
-            name: member.name,
-            phone: member.phone,
-            avatar: member.avatar || null,
-            role: member.role || null, // Preserve role from API response
-          }
-        })
-      )
 
-      if (reset) {
-        members.value = membersWithInfo
+    if (response.success && Array.isArray(response.data)) {
+      const members = response.data as Array<{ userId: string; role?: string | null }>
+      totalMembers.value = members.length
+
+      const currentUserId = authStore.user?.userId
+      if (currentUserId) {
+        const currentMember = members.find(member => member.userId === currentUserId)
+        currentUserRole.value = currentMember?.role || null
       } else {
-        members.value.push(...membersWithInfo)
+        currentUserRole.value = null
       }
-
-      totalMembers.value = allMembers.length
-      hasMorePages.value = endIndex < allMembers.length
+    } else {
+      totalMembers.value = null
+      currentUserRole.value = null
     }
-  } catch (error: any) {
-    console.error('Failed to load members:', error)
+  } catch (error) {
+    console.error('Failed to load members info:', error)
+    totalMembers.value = null
+    currentUserRole.value = null
   } finally {
-    isLoading.value = false
-    isLoadingMore.value = false
-  }
-}
-
-async function loadMore() {
-  if (hasMorePages.value && !isLoadingMore.value) {
-    currentPage.value++
-    await loadMembers(false)
+    isLoadingInfo.value = false
   }
 }
 
@@ -280,17 +184,6 @@ function close() {
 
 function openAddMembers() {
   emit('add-members')
-}
-
-function formatPhone(phone: string): string {
-  if (!phone) return ''
-  
-  // Format: 79123456789 -> +7 912 345-67-89
-  if (phone.startsWith('7') && phone.length === 11) {
-    return `+7 ${phone.substring(1, 4)} ${phone.substring(4, 7)}-${phone.substring(7, 9)}-${phone.substring(9)}`
-  }
-  
-  return phone
 }
 
 async function leaveGroup() {
@@ -304,11 +197,9 @@ async function leaveGroup() {
 
   try {
     await api.removeDialogMember(props.dialog.dialogId, authStore.user.userId)
-    
-    // Reload dialogs list
+
     await dialogsStore.fetchDialogs()
-    
-    // Emit event and close modal
+
     emit('left-group')
     emit('close')
   } catch (error: any) {

@@ -29,6 +29,7 @@
           :disabled="isAdding"
           @input="debouncedSearch"
         />
+        <p class="mt-2 text-xs text-gray-500">По умолчанию показываем не более 10 пользователей. Уточните запрос, чтобы найти нужного участника.</p>
       </div>
 
       <!-- Users List -->
@@ -130,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import api from '@/services/api'
 import Avatar from '@/components/Avatar.vue'
 
@@ -140,6 +141,8 @@ interface User {
   phone: string
   avatar?: string | null
 }
+
+const DEFAULT_LIMIT = 10
 
 const props = defineProps<{
   isOpen: boolean
@@ -173,18 +176,29 @@ watch(() => props.isOpen, (newValue) => {
     loadUsers()
     selectedUserIds.value.clear()
   } else {
-    // Reset on close
     searchQuery.value = ''
     users.value = []
     selectedUserIds.value.clear()
+    clearTimeout(searchTimeout)
   }
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(searchTimeout)
 })
 
 async function loadUsers(search?: string) {
   isLoading.value = true
   try {
-    const response = await api.getUsers({ search, limit: 100 })
-    users.value = response.data || []
+    const params: { limit: number; search?: string } = { limit: DEFAULT_LIMIT }
+    const trimmed = search?.trim()
+
+    if (trimmed) {
+      params.search = trimmed
+    }
+
+    const response = await api.getUsers(params)
+    users.value = Array.isArray(response.data) ? (response.data as User[]) : []
   } catch (error: any) {
     console.error('Failed to load users:', error)
   } finally {
@@ -194,8 +208,9 @@ async function loadUsers(search?: string) {
 
 function debouncedSearch() {
   clearTimeout(searchTimeout)
+  const query = searchQuery.value.trim()
   searchTimeout = setTimeout(() => {
-    loadUsers(searchQuery.value)
+    loadUsers(query || undefined)
   }, 300)
 }
 
