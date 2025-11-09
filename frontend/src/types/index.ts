@@ -106,6 +106,7 @@ export interface TypingEvent {
   userId: string
   userName?: string
   dialogId: string
+  expiresInMs?: number
 }
 
 export interface UserPresenceEvent {

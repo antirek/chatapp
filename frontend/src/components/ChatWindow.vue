@@ -258,9 +258,12 @@ const isGroupChat = computed(() => {
   return chatType === 'group'
 })
 
+const typingUsersSet = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
+
 const typingUsersText = computed(() => {
-  if (messagesStore.typingUsers.size === 0) return ''
-  if (messagesStore.typingUsers.size === 1) return 'печатает...'
+  const size = typingUsersSet.value.size
+  if (size === 0) return ''
+  if (size === 1) return 'печатает...'
   return 'печатают...'
 })
 

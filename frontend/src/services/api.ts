@@ -120,6 +120,11 @@ class ApiService {
     return data
   }
 
+  async sendTyping(dialogId: string): Promise<ApiResponse<{ expiresInMs: number }>> {
+    const { data } = await this.api.post(`/dialogs/${dialogId}/typing`)
+    return data
+  }
+
   async deleteDialog(dialogId: string): Promise<ApiResponse> {
     const { data} = await this.api.delete(`/dialogs/${dialogId}`)
     return data

@@ -11,6 +11,7 @@ import {
   getDialogMembers,
   addDialogMember,
   removeDialogMember,
+  sendTypingIndicator,
 } from '../controllers/dialogsController.js';
 
 const router = express.Router();
@@ -123,6 +124,28 @@ router.post('/', createDialog);
  *         description: List of public dialogs
  */
 router.get('/public', getPublicDialogs);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/typing:
+ *   post:
+ *     tags: [Dialogs]
+ *     summary: Send typing indicator for current user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '202':
+ *         description: Typing indicator accepted
+ *       '400':
+ *         description: Invalid dialog ID
+ */
+router.post('/:dialogId/typing', sendTypingIndicator);
 
 /**
  * @openapi

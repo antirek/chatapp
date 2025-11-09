@@ -20,6 +20,11 @@ class WebSocketService {
     })
 
     this.setupEventListeners()
+
+    if (import.meta.env.DEV) {
+      // @ts-expect-error debug helper
+      window.__chatWebSocket = this.socket
+    }
   }
 
   private setupEventListeners() {
@@ -67,28 +72,14 @@ class WebSocketService {
       this.emit('user:offline', data)
     })
 
-    // Typing indicators
-    this.socket.on('typing:start', (data: TypingEvent) => {
-      this.emit('typing:start', data)
-    })
-
-    this.socket.on('typing:stop', (data: TypingEvent) => {
-      this.emit('typing:stop', data)
+    // Typing indicators via Chat3 updates
+    this.socket.on('typing:update', (data: TypingEvent) => {
+      this.emit('typing:update', data)
     })
   }
 
   // ✅ Pure RabbitMQ architecture - no Socket.io room management needed
   // Updates now come through RabbitMQ, no need to join Socket.io rooms
-
-  // Send typing start
-  startTyping(dialogId: string) {
-    this.socket?.emit('typing:start', { dialogId })
-  }
-
-  // Send typing stop
-  stopTyping(dialogId: string) {
-    this.socket?.emit('typing:stop', { dialogId })
-  }
 
   // Event subscription
   on(event: string, callback: EventCallback) {

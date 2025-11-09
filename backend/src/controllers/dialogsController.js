@@ -921,3 +921,57 @@ export async function removeDialogMember(req, res) {
   }
 }
 
+export async function sendTypingIndicator(req, res) {
+  try {
+    const { dialogId } = req.params;
+    const userId = req.user?.userId;
+    const userName = req.user?.name;
+
+    if (!dialogId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dialog ID is required',
+      });
+    }
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'User authentication required',
+      });
+    }
+
+    const response = await Chat3Client.sendTypingSignal(dialogId, userId);
+    const expiresInMs =
+      response?.data?.expiresInMs ??
+      response?.data?.expiresIn ??
+      response?.data?.ttl ??
+      5000;
+
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('typing:update', {
+          dialogId,
+          userId,
+          userName,
+          expiresInMs,
+        });
+      }
+    } catch (broadcastError) {
+      console.warn('Failed to broadcast typing update via WebSocket:', broadcastError.message);
+    }
+
+    return res.status(202).json({
+      success: true,
+      expiresInMs,
+    });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to send typing indicator',
+    });
+  }
+}
+

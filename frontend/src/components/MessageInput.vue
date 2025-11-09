@@ -126,9 +126,11 @@ function handleInput() {
   if (!dialogsStore.currentDialog) return
 
   // Start typing indicator
-  if (!isTyping.value && messageText.value.length > 0) {
-    isTyping.value = true
-    messagesStore.startTyping(dialogsStore.currentDialog.dialogId)
+  if (messageText.value.length > 0) {
+    if (!isTyping.value) {
+      isTyping.value = true
+    }
+    void messagesStore.sendTypingSignal(dialogsStore.currentDialog.dialogId)
   }
 
   // Reset timeout
@@ -148,7 +150,6 @@ function stopTyping() {
   if (!dialogsStore.currentDialog) return
 
   isTyping.value = false
-  messagesStore.stopTyping(dialogsStore.currentDialog.dialogId)
 
   if (typingTimeout) {
     clearTimeout(typingTimeout)

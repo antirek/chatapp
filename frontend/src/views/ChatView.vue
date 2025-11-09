@@ -239,14 +239,51 @@ onMounted(async () => {
   await loadCurrentUserAvatar()
 })
 
+async function handleReconnect() {
+  // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
+  console.log('🔄 WebSocket reconnected, reloading dialogs...')
+  
+  // Reload dialogs after reconnect to get any updates we missed
+  try {
+    await dialogsStore.fetchDialogs()
+    console.log('✅ Dialogs reloaded after reconnect')
+  } catch (error) {
+    console.error('❌ Failed to reload dialogs after reconnect:', error)
+  }
+}
+
+const handleTypingUpdate = (event: any) => {
+  console.log('✍️ Typing update received:', event)
+  const dialogId =
+    event.dialogId ||
+    event.data?.dialogId ||
+    event?.update?.dialogId
+
+  if (!dialogId || dialogId !== dialogsStore.currentDialog?.dialogId) {
+    return
+  }
+
+  const userId = event.userId || event.data?.userId
+  if (!userId) {
+    return
+  }
+
+  const expiresInMs =
+    event.expiresInMs ||
+    event.data?.expiresInMs ||
+    event.data?.expiresIn ||
+    5000
+
+  messagesStore.addTypingUser(dialogId, userId, expiresInMs)
+}
+
 onUnmounted(() => {
   // Clean up WebSocket listeners
   websocket.off('chat3:update', handleChat3Update)
   websocket.off('message:new', handleNewMessage)
   websocket.off('message:update', handleMessageUpdate)
   websocket.off('dialog:update', handleDialogUpdate)
-  websocket.off('typing:start', handleTypingStart)
-  websocket.off('typing:stop', handleTypingStop)
+  websocket.off('typing:update', handleTypingUpdate)
   websocket.off('connected', handleReconnect)
   
   // Clean up audio
@@ -260,22 +297,8 @@ function setupWebSocketListeners() {
   websocket.on('message:new', handleNewMessage)
   websocket.on('message:update', handleMessageUpdate)
   websocket.on('dialog:update', handleDialogUpdate)
-  websocket.on('typing:start', handleTypingStart)
-  websocket.on('typing:stop', handleTypingStop)
+  websocket.on('typing:update', handleTypingUpdate)
   websocket.on('connected', handleReconnect)
-}
-
-async function handleReconnect() {
-  // ✅ Pure RabbitMQ - queue resumes automatically on reconnect
-  console.log('🔄 WebSocket reconnected, reloading dialogs...')
-  
-  // Reload dialogs after reconnect to get any updates we missed
-  try {
-    await dialogsStore.fetchDialogs()
-    console.log('✅ Dialogs reloaded after reconnect')
-  } catch (error) {
-    console.error('❌ Failed to reload dialogs after reconnect:', error)
-  }
 }
 
 function handleChat3Update(update: any) {
@@ -300,6 +323,14 @@ function handleChat3Update(update: any) {
     case 'dialog.member.remove':
       // Dialog created, updated, or members changed - refresh dialogs list
       handleDialogUpdate(update)
+      break
+
+    case 'dialog.typing':
+      handleTypingUpdate({
+        dialogId: update.dialogId || update.data?.dialogId,
+        userId: update.data?.userId,
+        expiresInMs: update.data?.expiresInMs || update.data?.expiresIn
+      })
       break
     
     default:
@@ -393,20 +424,12 @@ function handleDialogUpdate(update: any) {
   dialogsStore.fetchDialogs()
 }
 
-function handleTypingStart(event: any) {
-  if (event.dialogId === dialogsStore.currentDialog?.dialogId) {
-    messagesStore.addTypingUser(event.userId)
-  }
-}
-
-function handleTypingStop(event: any) {
-  messagesStore.removeTypingUser(event.userId)
-}
-
 async function selectDialog(dialogId: string) {
+  console.log('➡️ Selecting dialog:', dialogId)
   await dialogsStore.selectDialog(dialogId)
   
   if (dialogsStore.currentDialog) {
+    console.log('✅ Current dialog set:', dialogsStore.currentDialog.dialogId)
     // ✅ Pure RabbitMQ - updates come through user queue automatically
     
     // Load messages

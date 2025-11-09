@@ -71,7 +71,7 @@
               <button
                 v-for="dialog in filteredSearchResults.personal"
                 :key="`personal-${dialog.dialogId}`"
-                @click="$emit('select', dialog.dialogId)"
+                @click="emitSelect(dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
                 :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
               >
@@ -120,7 +120,7 @@
               <button
                 v-for="dialog in filteredSearchResults.groups"
                 :key="`groups-${dialog.dialogId}`"
-                @click="$emit('select', dialog.dialogId)"
+                @click="emitSelect(dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
                 :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
               >
@@ -177,7 +177,7 @@
               <button
                 v-for="dialog in filteredSearchResults.publicGroups"
                 :key="`public-${dialog.dialogId}`"
-                @click="$emit('select', dialog.dialogId)"
+                @click="emitSelect(dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
                 :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
               >
@@ -265,7 +265,7 @@
           <button
             v-for="dialog in dialogsStore.dialogs"
             :key="dialog.dialogId"
-            @click="$emit('select', dialog.dialogId)"
+            @click="emitSelect(dialog.dialogId)"
             class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
             :class="{ 'bg-primary-50': isActive(dialog.dialogId) }"
           >
@@ -346,7 +346,7 @@ import { useAuthStore } from '@/stores/auth'
 import Avatar from './Avatar.vue'
 import type { Dialog } from '@/types'
 
-defineEmits<{
+const emit = defineEmits<{
   select: [dialogId: string]
 }>()
 
@@ -367,6 +367,11 @@ const filterOptions: Array<{ label: string; value: FilterOptionValue; icon?: str
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const scrollContainer = ref<HTMLElement | null>(null)
 const LOAD_MORE_THRESHOLD_PX = 200
+
+function emitSelect(dialogId: string) {
+  console.log('🖱️ DialogList emitting select:', dialogId)
+  emit('select', dialogId)
+}
 
 const isSearchActive = computed(() => (searchTerm.value || '').trim().length >= MIN_SEARCH_LENGTH)
 const filteredSearchResults = computed(() => {

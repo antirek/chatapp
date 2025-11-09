@@ -63,6 +63,20 @@ export async function initializeWebSocket(server) {
           socket.emit('message:new', update.data);
         } else if (update.eventType.startsWith('message.')) {
           socket.emit('message:update', update);
+        } else if (update.eventType === 'dialog.typing') {
+          console.log(
+            `✍️  Typing update for dialog ${update.dialogId || update.data?.dialogId}:`,
+            update.data?.userId || update.userId,
+          );
+          socket.emit('typing:update', {
+            dialogId: update.data?.dialogId || update.dialogId || update.entityId,
+            userId: update.data?.userId || update.userId,
+            expiresInMs:
+              update.data?.expiresInMs ??
+              update.data?.expiresIn ??
+              update.data?.ttl ??
+              5000,
+          });
         } else if (update.eventType.startsWith('dialog.')) {
           socket.emit('dialog:update', update);
         }
@@ -86,22 +100,6 @@ export async function initializeWebSocket(server) {
     socket.on('dialog:leave', (dialogId) => {
       socket.leave(`dialog:${dialogId}`);
       console.log(`📭 [HYBRID] User ${socket.userName} left dialog:${dialogId}`);
-    });
-
-    // Handle typing indicator
-    socket.on('typing:start', ({ dialogId }) => {
-      socket.to(`dialog:${dialogId}`).emit('typing:start', {
-        userId: socket.userId,
-        userName: socket.userName,
-        dialogId,
-      });
-    });
-
-    socket.on('typing:stop', ({ dialogId }) => {
-      socket.to(`dialog:${dialogId}`).emit('typing:stop', {
-        userId: socket.userId,
-        dialogId,
-      });
     });
 
     // Handle disconnect

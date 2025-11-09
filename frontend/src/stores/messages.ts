@@ -1,16 +1,22 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
-import websocket from '@/services/websocket'
 import type { Message, SendMessageData } from '@/types'
+import websocket from '@/services/websocket'
 import { useAuthStore } from './auth'
 import { ensureNormalizedMessage, mapOutgoingMessageType } from '@/utils/messageType'
+import { useDialogsStore } from './dialogs'
+
+let typingListenerRegistered = false
 
 export const useMessagesStore = defineStore('messages', () => {
   const messages = ref<Message[]>([])
-  const typingUsers = ref<Set<string>>(new Set())
+  const typingUsersByDialog = ref<Map<string, Set<string>>>(new Map())
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const typingTimeouts = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
+  const lastTypingSignalAt = new Map<string, number>()
+  const TYPING_THROTTLE_MS = 800
 
   const sortedMessages = computed(() => {
     return [...messages.value].sort((a, b) => {
@@ -183,35 +189,126 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  function startTyping(dialogId: string) {
-    websocket.startTyping(dialogId)
-  }
+  async function sendTypingSignal(dialogId: string) {
+    const now = Date.now()
+    const lastSignal = lastTypingSignalAt.get(dialogId) || 0
 
-  function stopTyping(dialogId: string) {
-    websocket.stopTyping(dialogId)
-  }
+    if (now - lastSignal < TYPING_THROTTLE_MS) {
+      return
+    }
 
-  function addTypingUser(userId: string) {
-    const authStore = useAuthStore()
-    
-    // Don't add current user
-    if (userId !== authStore.user?.userId) {
-      typingUsers.value.add(userId)
+    lastTypingSignalAt.set(dialogId, now)
+
+    try {
+      console.log('📝 Sending typing signal for dialog:', dialogId)
+      await api.sendTyping(dialogId)
+    } catch (err: any) {
+      console.warn('Failed to send typing signal:', err?.response?.data?.error || err?.message)
     }
   }
 
-  function removeTypingUser(userId: string) {
-    typingUsers.value.delete(userId)
+  function updateTypingSet(dialogId: string, updater: (set: Set<string>) => void) {
+    const currentMap = typingUsersByDialog.value
+    const currentSet = new Set(currentMap.get(dialogId) ?? [])
+    updater(currentSet)
+    const nextMap = new Map(currentMap)
+    if (currentSet.size === 0) {
+      nextMap.delete(dialogId)
+    } else {
+      nextMap.set(dialogId, currentSet)
+    }
+    typingUsersByDialog.value = nextMap
+  }
+
+  function ensureTimeoutMap(dialogId: string) {
+    if (!typingTimeouts.has(dialogId)) {
+      typingTimeouts.set(dialogId, new Map())
+    }
+    return typingTimeouts.get(dialogId)!
+  }
+
+  function addTypingUser(dialogId: string, userId: string, expiresInMs: number = 5000) {
+    const authStore = useAuthStore()
+    if (userId === authStore.user?.userId) {
+      return
+    }
+
+    updateTypingSet(dialogId, (set) => set.add(userId))
+
+    const dialogTimeouts = ensureTimeoutMap(dialogId)
+    if (dialogTimeouts.has(userId)) {
+      clearTimeout(dialogTimeouts.get(userId)!)
+    }
+    dialogTimeouts.set(
+      userId,
+      setTimeout(() => {
+        removeTypingUser(dialogId, userId)
+      }, expiresInMs)
+    )
+  }
+
+  function removeTypingUser(dialogId: string, userId: string) {
+    updateTypingSet(dialogId, (set) => {
+      set.delete(userId)
+    })
+
+    const dialogTimeouts = typingTimeouts.get(dialogId)
+    if (dialogTimeouts?.has(userId)) {
+      clearTimeout(dialogTimeouts.get(userId)!)
+      dialogTimeouts.delete(userId)
+      if (dialogTimeouts.size === 0) {
+        typingTimeouts.delete(dialogId)
+      }
+    }
   }
 
   function clearMessages() {
     messages.value = []
+    typingUsersByDialog.value = new Map()
+    typingTimeouts.forEach((timeoutMap) => {
+      timeoutMap.forEach((timeout) => clearTimeout(timeout))
+    })
+    typingTimeouts.clear()
+    lastTypingSignalAt.clear()
   }
 
-  return {
+  if (!typingListenerRegistered) {
+    typingListenerRegistered = true
+    websocket.on('typing:update', (event: TypingEvent) => {
+      const dialogsStore = useDialogsStore()
+      const currentDialogId = dialogsStore.currentDialog?.dialogId
+      const eventDialogId = event.dialogId
+      if (!eventDialogId || eventDialogId !== currentDialogId) {
+        return
+      }
+      if (!event.userId) {
+        return
+      }
+      const expiresInMs = event.expiresInMs ?? 5000
+      if (import.meta.env.DEV) {
+        console.log('[messagesStore] typing:update', event)
+      }
+      addTypingUser(eventDialogId, event.userId, expiresInMs)
+    })
+  }
+
+  function getTypingUsers(dialogId: string): Set<string> {
+    return new Set(typingUsersByDialog.value.get(dialogId) ?? [])
+  }
+
+  function clearTypingForDialog(dialogId: string) {
+    updateTypingSet(dialogId, (set) => set.clear())
+    const dialogTimeouts = typingTimeouts.get(dialogId)
+    if (dialogTimeouts) {
+      dialogTimeouts.forEach((timeout) => clearTimeout(timeout))
+      typingTimeouts.delete(dialogId)
+    }
+  }
+
+  const storeApi = {
     messages,
     sortedMessages,
-    typingUsers,
+    typingUsersByDialog,
     isLoading,
     error,
     fetchMessages,
@@ -220,11 +317,39 @@ export const useMessagesStore = defineStore('messages', () => {
     updateMessage,
     markAsRead,
     addReaction,
-    startTyping,
-    stopTyping,
+    sendTypingSignal,
     addTypingUser,
     removeTypingUser,
+    getTypingUsers,
+    clearTypingForDialog,
     clearMessages
   }
+
+  if (import.meta.env.DEV) {
+    const globalStores = (window as any).__piniaStores || ((window as any).__piniaStores = {})
+    globalStores.messages = storeApi
+  }
+
+  return storeApi
 })
+
+if (import.meta.env.DEV) {
+  // @ts-expect-error expose for debugging
+  window.__typingStore = {
+    get typingUsers() {
+      const store = useMessagesStore() as any
+      const map: Map<string, Set<string>> = store.typingUsersByDialog
+      return Array.from(map.entries()).reduce<Record<string, string[]>>((acc, [dialogId, set]) => {
+        acc[dialogId] = Array.from(set)
+        return acc
+      }, {})
+    },
+    addTypingUser: (dialogId: string, userId: string, expiresInMs?: number) => {
+      ;(useMessagesStore() as any).addTypingUser(dialogId, userId, expiresInMs)
+    },
+    removeTypingUser: (dialogId: string, userId: string) => {
+      ;(useMessagesStore() as any).removeTypingUser(dialogId, userId)
+    }
+  }
+}
 

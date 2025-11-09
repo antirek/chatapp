@@ -163,6 +163,17 @@ class Chat3Client {
   }
 
   /**
+   * Send typing indicator for user in dialog
+   */
+  async sendTypingSignal(dialogId, userId) {
+    const response = await this.client.post(`/dialogs/${dialogId}/user/${userId}/typing`);
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
+  /**
    * Remove reaction
    */
   async removeReaction(messageId, reaction) {
