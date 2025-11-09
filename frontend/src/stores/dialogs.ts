@@ -29,6 +29,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     publicGroups?: DialogSearchResponse['publicGroups']['pagination']
   }>({})
   const searchSequence = ref(0)
+  const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public'>('all')
 
   const hasMoreDialogs = computed(() => {
     if (!pagination.value) {
@@ -45,6 +46,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     includeLastMessage?: boolean
     append?: boolean
     retries?: number
+    type?: 'all' | 'p2p' | 'group:private' | 'group:public'
   }
 
   async function fetchDialogs(params?: FetchDialogsParams) {
@@ -52,6 +54,16 @@ export const useDialogsStore = defineStore('dialogs', () => {
     const limit = params?.limit ?? pagination.value?.limit ?? 50
     const includeLastMessage = params?.includeLastMessage ?? true
     const append = params?.append ?? page > 1
+    let filterForRequest: 'all' | 'p2p' | 'group:private' | 'group:public' = currentFilter.value
+
+    if (params?.type !== undefined) {
+      filterForRequest = params.type
+      if (!append) {
+        currentFilter.value = filterForRequest
+      } else {
+        currentFilter.value = filterForRequest
+      }
+    }
 
     if (append) {
       if (isLoadingMore.value || isLoading.value) {
@@ -79,7 +91,8 @@ export const useDialogsStore = defineStore('dialogs', () => {
         const response = await api.getDialogs({
           page,
           limit,
-          includeLastMessage
+          includeLastMessage,
+          type: filterForRequest
         })
 
         const normalizedDialogs = response.data.map(dialog => normalizeDialog(dialog))
@@ -168,7 +181,8 @@ export const useDialogsStore = defineStore('dialogs', () => {
       page: nextPage,
       limit,
       includeLastMessage: true,
-      append: true
+      append: true,
+      type: currentFilter.value
     })
   }
 
@@ -376,6 +390,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     updateDialogUnreadCount,
     incrementUnreadCount,
     updateLastMessage,
+    currentFilter,
     isSearching,
     searchError,
     searchResults,

@@ -196,16 +196,46 @@ async function processP2PDialog(dialog, currentUser) {
   };
 }
 
+function isPublicGroup(dialog) {
+  const groupType =
+    extractMetaValue(dialog.meta, 'groupType') ||
+    extractMetaValue(dialog.meta, 'visibility') ||
+    dialog.meta?.groupType ||
+    dialog.meta?.visibility;
+  return (groupType || '').toLowerCase() === 'public';
+}
+
+function isGroupDialog(dialog) {
+  const dialogType = dialog.chatType || dialog.meta?.type || dialog.type;
+  return dialogType === 'group';
+}
+
 export async function getDialogs(req, res) {
   try {
-    const { page = 1, limit = 10, includeLastMessage = false } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      includeLastMessage = false,
+      type: rawType,
+    } = req.query;
     const currentUserId = req.user.userId;
+    const requestedType = typeof rawType === 'string' ? rawType : null;
 
-    const result = await Chat3Client.getUserDialogs(currentUserId, {
+    const params = {
       page,
       limit,
       includeLastMessage,
-    });
+    };
+
+    if (requestedType === 'p2p') {
+      params.filter = '(meta.type,eq,p2p)';
+    } else if (requestedType === 'group:public') {
+      params.filter = '(meta.type,eq,group)&(meta.groupType,eq,public)';
+    } else if (requestedType === 'group:private') {
+      params.filter = '(meta.type,eq,group)';
+    }
+
+    const result = await Chat3Client.getUserDialogs(currentUserId, params);
 
     const dialogsWithContext = result.data.map((dialog) => ({
       ...dialog,
@@ -227,9 +257,25 @@ export async function getDialogs(req, res) {
       }),
     );
 
+    let filteredDialogs = processedDialogs;
+
+    if (requestedType === 'p2p') {
+      filteredDialogs = processedDialogs.filter(
+        (dialog) => (dialog.chatType || dialog.meta?.type || dialog.type) === 'p2p',
+      );
+    } else if (requestedType === 'group:public') {
+      filteredDialogs = processedDialogs.filter(
+        (dialog) => isGroupDialog(dialog) && isPublicGroup(dialog),
+      );
+    } else if (requestedType === 'group:private') {
+      filteredDialogs = processedDialogs.filter(
+        (dialog) => isGroupDialog(dialog) && !isPublicGroup(dialog),
+      );
+    }
+
     return res.json({
       success: true,
-      data: processedDialogs,
+      data: filteredDialogs,
       pagination: result.pagination,
     });
   } catch (error) {

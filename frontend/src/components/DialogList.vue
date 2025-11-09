@@ -22,6 +22,22 @@
           </svg>
         </button>
       </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button
+          v-for="option in filterOptions"
+          :key="option.value"
+          type="button"
+          class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary-300"
+          :class="isFilterSelected(option.value)
+            ? 'bg-primary-100 text-primary-700 border-primary-200'
+            : 'bg-gray-100 text-gray-600 border-transparent hover:bg-gray-200'"
+          :aria-pressed="isFilterSelected(option.value)"
+          @click="handleFilterClick(option.value)"
+        >
+          <span v-if="option.icon" aria-hidden="true">{{ option.icon }}</span>
+          {{ option.label }}
+        </button>
+      </div>
     </div>
 
     <div
@@ -47,13 +63,13 @@
         </div>
 
         <div v-else-if="hasSearchResults" class="space-y-6 py-4">
-          <div v-if="searchResults.personal.length > 0" class="px-2">
+          <div v-if="filteredSearchResults.personal.length > 0" class="px-2">
             <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               Личные чаты
             </h4>
             <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
               <button
-                v-for="dialog in searchResults.personal"
+                v-for="dialog in filteredSearchResults.personal"
                 :key="`personal-${dialog.dialogId}`"
                 @click="$emit('select', dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
@@ -96,13 +112,13 @@
             </div>
           </div>
 
-          <div v-if="searchResults.groups.length > 0" class="px-2">
+          <div v-if="filteredSearchResults.groups.length > 0" class="px-2">
             <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               Мои группы
             </h4>
             <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
               <button
-                v-for="dialog in searchResults.groups"
+                v-for="dialog in filteredSearchResults.groups"
                 :key="`groups-${dialog.dialogId}`"
                 @click="$emit('select', dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
@@ -153,13 +169,13 @@
             </div>
           </div>
 
-          <div v-if="searchResults.publicGroups.length > 0" class="px-2">
+          <div v-if="filteredSearchResults.publicGroups.length > 0" class="px-2">
             <h4 class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               Публичные группы
             </h4>
             <div class="divide-y divide-gray-200 bg-white rounded-lg shadow-sm border border-gray-100">
               <button
-                v-for="dialog in searchResults.publicGroups"
+                v-for="dialog in filteredSearchResults.publicGroups"
                 :key="`public-${dialog.dialogId}`"
                 @click="$emit('select', dialog.dialogId)"
                 class="w-full p-4 text-left hover:bg-gray-50 transition-colors relative flex items-start gap-3"
@@ -336,17 +352,55 @@ defineEmits<{
 
 const dialogsStore = useDialogsStore()
 const authStore = useAuthStore()
-const { isSearching, searchError, searchResults, lastSearchTerm, isLoadingMore, hasMoreDialogs } = storeToRefs(dialogsStore)
+const { isSearching, searchError, searchResults, lastSearchTerm, isLoadingMore, hasMoreDialogs, currentFilter } = storeToRefs(dialogsStore)
 
 const searchTerm = ref(lastSearchTerm.value || '')
 const MIN_SEARCH_LENGTH = 2
+type FilterOptionValue = 'all' | 'p2p' | 'group:private' | 'group:public'
+
+const filterOptions: Array<{ label: string; value: FilterOptionValue; icon?: string }> = [
+  { label: 'Все', value: 'all' },
+  { label: 'Личные', value: 'p2p', icon: '👥' },
+  { label: 'Приватные группы', value: 'group:private', icon: '🔒' },
+  { label: 'Публичные группы', value: 'group:public', icon: '🌐' }
+]
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const scrollContainer = ref<HTMLElement | null>(null)
 const LOAD_MORE_THRESHOLD_PX = 200
 
 const isSearchActive = computed(() => (searchTerm.value || '').trim().length >= MIN_SEARCH_LENGTH)
+const filteredSearchResults = computed(() => {
+  const base = searchResults.value || { personal: [], groups: [], publicGroups: [] }
+  const isPublicGroup = (dialog: Dialog) => {
+    const groupType = dialog.meta?.groupType || dialog.meta?.visibility || ''
+    return groupType.toLowerCase() === 'public'
+  }
+
+  switch (currentFilter.value) {
+    case 'p2p':
+      return {
+        personal: base.personal,
+        groups: [],
+        publicGroups: []
+      }
+    case 'group:private':
+      return {
+        personal: [],
+        groups: base.groups.filter(dialog => !isPublicGroup(dialog)),
+        publicGroups: []
+      }
+    case 'group:public':
+      return {
+        personal: [],
+        groups: [],
+        publicGroups: base.publicGroups
+      }
+    default:
+      return base
+  }
+})
 const hasSearchResults = computed(() => {
-  const results = searchResults.value || { personal: [], groups: [], publicGroups: [] }
+  const results = filteredSearchResults.value
   return (
     results.personal.length > 0 ||
     results.groups.length > 0 ||
@@ -371,6 +425,9 @@ if (import.meta.env.DEV) {
       },
       get results() {
         return searchResults.value
+      },
+      get filtered() {
+        return filteredSearchResults.value
       },
       get error() {
         return searchError.value
@@ -444,6 +501,37 @@ watch(
 function clearSearchTerm() {
   searchTerm.value = ''
   dialogsStore.clearSearch()
+}
+
+function isFilterSelected(filter: FilterOptionValue): boolean {
+  return currentFilter.value === filter
+}
+
+async function handleFilterClick(filter: FilterOptionValue) {
+  const trimmedSearch = searchTerm.value.trim()
+  let nextFilter: FilterOptionValue
+
+  if (filter === 'all') {
+    nextFilter = 'all'
+  } else if (isFilterSelected(filter)) {
+    nextFilter = 'all'
+  } else {
+    nextFilter = filter
+  }
+
+  try {
+    await dialogsStore.fetchDialogs({
+      page: 1,
+      includeLastMessage: true,
+      type: nextFilter,
+      append: false
+    })
+    if (trimmedSearch.length >= MIN_SEARCH_LENGTH) {
+      await dialogsStore.searchDialogs(trimmedSearch)
+    }
+  } catch (error) {
+    console.error('Failed to apply dialog filter:', error)
+  }
 }
 
 function isActive(dialogId: string): boolean {

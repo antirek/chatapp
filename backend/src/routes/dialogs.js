@@ -40,6 +40,12 @@ router.use(authenticate);
  *         name: includeLastMessage
  *         schema:
  *           type: boolean
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [p2p, group:private, group:public]
+ *         description: Filter dialogs by type
  *     responses:
  *       '200':
  *         description: List of dialogs

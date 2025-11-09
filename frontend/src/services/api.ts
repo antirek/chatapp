@@ -69,8 +69,13 @@ class ApiService {
     page?: number
     limit?: number
     includeLastMessage?: boolean
+    type?: 'p2p' | 'group:private' | 'group:public' | 'all'
   }): Promise<PaginatedResponse<Dialog>> {
-    const { data } = await this.api.get('/dialogs', { params })
+    const queryParams = { ...params }
+    if (queryParams?.type === 'all') {
+      delete (queryParams as any).type
+    }
+    const { data } = await this.api.get('/dialogs', { params: queryParams })
     return data
   }
 
