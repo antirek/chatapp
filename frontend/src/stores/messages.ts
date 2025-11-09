@@ -237,31 +237,6 @@ export const useMessagesStore = defineStore('messages', () => {
     return typingTimeouts.get(dialogId)!
   }
 
-  function inferTypingUserName(dialogId: string, userId: string, providedName?: string): string | undefined {
-    const nameCandidate = providedName?.trim()
-    if (nameCandidate) {
-      return nameCandidate
-    }
-
-    const dialogFromCurrent = dialogsStore.currentDialog && dialogsStore.currentDialog.dialogId === dialogId
-      ? dialogsStore.currentDialog
-      : null
-
-    const dialogFromList = dialogsStore.dialogs.find((dialog) => dialog.dialogId === dialogId)
-    const candidates = [dialogFromCurrent, dialogFromList].filter(Boolean)
-
-    for (const candidate of candidates) {
-      if (!candidate) continue
-
-      const member = candidate.members?.find((participant) => participant.userId === userId)
-      if (member) {
-        return member.name || member.phone || undefined
-      }
-    }
-
-    return nameCandidate
-  }
-
   function addTypingUser(dialogId: string, userId: string, expiresInMs: number = 5000, userName?: string) {
     const authStore = useAuthStore()
     if (userId === authStore.user?.userId) {
@@ -269,7 +244,8 @@ export const useMessagesStore = defineStore('messages', () => {
     }
 
     const expiresAt = Date.now() + expiresInMs
-    const resolvedName = inferTypingUserName(dialogId, userId, userName)
+    const existingName = typingUsersByDialog.value.get(dialogId)?.get(userId)?.name
+    const resolvedName = userName?.trim() || existingName
 
     updateTypingMap(dialogId, (entryMap) => {
       entryMap.set(userId, {
@@ -331,7 +307,12 @@ export const useMessagesStore = defineStore('messages', () => {
       if (import.meta.env.DEV) {
         console.log('[messagesStore] typing:update', event)
       }
-      addTypingUser(eventDialogId, event.userId, expiresInMs, event.userName)
+      addTypingUser(
+        eventDialogId,
+        event.userId,
+        expiresInMs,
+        event.userName || event.userInfo?.name
+      )
     })
   }
 

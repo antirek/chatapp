@@ -103,11 +103,21 @@ export interface Chat3Update {
 }
 
 // WebSocket events
+export interface TypingUserInfo {
+  userId: string
+  tenantId?: string
+  name?: string
+  avatar?: string | null
+  [key: string]: any
+}
+
 export interface TypingEvent {
   userId: string
   userName?: string
   dialogId: string
   expiresInMs?: number
+  userInfo?: TypingUserInfo
+  data?: any
 }
 
 export interface UserPresenceEvent {

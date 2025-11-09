@@ -255,26 +255,38 @@ async function handleReconnect() {
 const handleTypingUpdate = (event: any) => {
   console.log('✍️ Typing update received:', event)
   const dialogId =
-    event.dialogId ||
-    event.data?.dialogId ||
+    event.dialogId ??
+    event.data?.dialogId ??
     event?.update?.dialogId
 
   if (!dialogId || dialogId !== dialogsStore.currentDialog?.dialogId) {
     return
   }
 
-  const userId = event.userId || event.data?.userId
+  const userId =
+    event.userId ??
+    event.data?.userId ??
+    event.data?.typing?.userId
+
   if (!userId) {
     return
   }
 
   const expiresInMs =
-    event.expiresInMs ||
-    event.data?.expiresInMs ||
-    event.data?.expiresIn ||
+    event.expiresInMs ??
+    event.data?.expiresInMs ??
+    event.data?.expiresIn ??
+    event.data?.typing?.expiresInMs ??
     5000
 
-  messagesStore.addTypingUser(dialogId, userId, expiresInMs)
+  const userName =
+    event.userName ??
+    event.userInfo?.name ??
+    event.data?.typing?.userInfo?.name ??
+    event.data?.userName ??
+    event.data?.name
+
+  messagesStore.addTypingUser(dialogId, userId, expiresInMs, userName)
 }
 
 onUnmounted(() => {
@@ -326,11 +338,19 @@ function handleChat3Update(update: any) {
       break
 
     case 'dialog.typing':
-      handleTypingUpdate({
-        dialogId: update.dialogId || update.data?.dialogId,
-        userId: update.data?.userId,
-        expiresInMs: update.data?.expiresInMs || update.data?.expiresIn
-      })
+      {
+        const typingPayload = update.data?.typing || {}
+        handleTypingUpdate({
+          dialogId: update.dialogId || update.data?.dialogId,
+          userId: typingPayload.userId || update.data?.userId,
+          userName: typingPayload.userInfo?.name || update.data?.userName,
+          userInfo: typingPayload.userInfo,
+          expiresInMs:
+            typingPayload.expiresInMs ||
+            update.data?.expiresInMs ||
+            update.data?.expiresIn
+        })
+      }
       break
     
     default:

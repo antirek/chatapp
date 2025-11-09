@@ -1,7 +1,6 @@
 import { Server } from 'socket.io';
 import AuthService from '../services/AuthService.js';
 import rabbitmqConsumer from '../services/rabbitmqConsumer.js';
-import { resolveUserName } from '../controllers/dialogsController.js';
 
 /**
  * Initialize WebSocket server
@@ -13,9 +12,6 @@ export async function initializeWebSocket(server) {
       methods: ['GET', 'POST'],
     },
   });
-
-  const typingNameCache = new Map();
-  const TYPING_NAME_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   // Connect to RabbitMQ Consumer for Updates
   try {
@@ -68,55 +64,59 @@ export async function initializeWebSocket(server) {
         } else if (update.eventType.startsWith('message.')) {
           socket.emit('message:update', update);
         } else if (update.eventType === 'dialog.typing') {
-          console.log(
-            `✍️  Typing update for dialog ${update.dialogId || update.data?.dialogId}:`,
-            update.data?.userId || update.userId,
-          );
+          const typingPayload = update.data?.typing || {};
+          const embeddedUserInfo =
+            typingPayload.userInfo ||
+            update.data?.userInfo ||
+            null;
 
-          const targetUserId = update.data?.userId || update.userId;
-          const dialogId = update.data?.dialogId || update.dialogId || update.entityId;
+          const targetUserId =
+            typingPayload.userId ||
+            embeddedUserInfo?.userId ||
+            update.data?.userId ||
+            update.userId;
+
+          const dialogId =
+            update.data?.dialogId ||
+            typingPayload.dialogId ||
+            update.dialogId ||
+            update.entityId;
+
           const expiresInMs =
+            typingPayload.expiresInMs ??
             update.data?.expiresInMs ??
             update.data?.expiresIn ??
             update.data?.ttl ??
             5000;
 
-          let userName =
+          const userName =
+            embeddedUserInfo?.name ||
             update.data?.userName ||
             update.userName ||
             update.data?.name ||
             null;
 
-          if (targetUserId) {
-            const cached = typingNameCache.get(targetUserId);
-            const now = Date.now();
+          console.log(
+            `✍️  Typing update for dialog ${dialogId}:`,
+            targetUserId,
+          );
 
-            if (!cached || now - cached.timestamp > TYPING_NAME_CACHE_TTL_MS) {
-              try {
-                const resolvedName = await resolveUserName(
-                  targetUserId,
-                  userName || undefined,
-                );
-                userName = resolvedName;
-                typingNameCache.set(targetUserId, {
-                  name: resolvedName,
-                  timestamp: now,
-                });
-              } catch (nameError) {
-                console.warn(
-                  `⚠️  Failed to resolve name for typing user ${targetUserId}:`,
-                  nameError.message,
-                );
+          const sanitizedUserInfo = embeddedUserInfo
+            ? {
+                userId: embeddedUserInfo.userId,
+                name: embeddedUserInfo.name,
+                avatar:
+                  embeddedUserInfo.avatar ||
+                  embeddedUserInfo.meta?.avatar ||
+                  null,
               }
-            } else {
-              userName = cached.name;
-            }
-          }
+            : undefined;
 
           socket.emit('typing:update', {
             dialogId,
             userId: targetUserId,
             userName: userName || undefined,
+            userInfo: sanitizedUserInfo,
             expiresInMs,
           });
         } else if (update.eventType.startsWith('dialog.')) {
