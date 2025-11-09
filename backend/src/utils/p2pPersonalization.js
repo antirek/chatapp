@@ -1,4 +1,5 @@
 import Chat3Client from '../services/Chat3Client.js';
+import User from '../models/User.js';
 
 function getMetaValue(meta, key) {
   if (!meta || !key) {
@@ -41,9 +42,29 @@ function resolveUserAvatar(user) {
   );
 }
 
-async function fetchUser(userId) {
-  const response = await Chat3Client.getUser(userId);
-  return response.data || response;
+export async function getP2PUserProfile(userId) {
+  try {
+    const response = await Chat3Client.getUser(userId);
+    return response.data || response;
+  } catch (error) {
+    if (error.response?.status === 404) {
+      const localUser = await User.findOne({ userId }).lean().exec();
+      if (localUser) {
+        return {
+          userId: localUser.userId,
+          name: localUser.name,
+          phone: localUser.phone,
+          meta: {
+            displayName: localUser.name,
+            fullName: localUser.name,
+            phone: localUser.phone,
+          },
+        };
+      }
+    }
+
+    throw error;
+  }
 }
 
 async function setDialogMeta(dialogId, key, value) {
@@ -71,7 +92,10 @@ function dialogAvatarKey(userId) {
 
 export async function updateP2PPersonalization(dialogId, userIdA, userIdB) {
   try {
-    const [userA, userB] = await Promise.all([fetchUser(userIdA), fetchUser(userIdB)]);
+    const [userA, userB] = await Promise.all([
+      getP2PUserProfile(userIdA),
+      getP2PUserProfile(userIdB),
+    ]);
 
     const nameForA = resolveUserName(userB);
     const nameForB = resolveUserName(userA);

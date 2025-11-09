@@ -2,7 +2,10 @@ import express from 'express';
 import Chat3Client from '../services/Chat3Client.js';
 import { authenticate } from '../middleware/auth.js';
 import { mapOutgoingMessageType } from '../utils/messageType.js';
-import { updateP2PPersonalization } from '../utils/p2pPersonalization.js';
+import {
+  updateP2PPersonalization,
+  getP2PUserProfile,
+} from '../utils/p2pPersonalization.js';
 
 const router = express.Router();
 
@@ -32,7 +35,7 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-  function createEmptyResult(page, limit) {
+function createEmptyResult(page, limit) {
   return {
     data: [],
     pagination: {
@@ -68,7 +71,95 @@ async function safeGetDialogs(params) {
 /**
  * Process P2P dialog: replace name and avatar with interlocutor's data
  */
-async function processP2PDialog(dialog, currentUserId) {
+async function ensureP2PMeta(dialog, currentUserId) {
+  const nameKey = `p2pDialogNameFor${currentUserId}`;
+  const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
+
+  const meta = dialog.meta || {};
+  let name = extractMetaValue(meta, nameKey);
+  let avatar = extractMetaValue(meta, avatarKey);
+
+  if (name && avatar !== undefined) {
+    return { name, avatar };
+  }
+
+  let members = dialog.members || [];
+
+  if (members.length === 0) {
+    try {
+      const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
+      members = (fullDialog.data || fullDialog).members || [];
+    } catch (error) {
+      console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
+      return { name, avatar };
+    }
+  }
+
+  const interlocutor = members.find(
+    member => member.userId && member.userId !== currentUserId
+  );
+
+  if (!interlocutor) {
+    console.warn(`No interlocutor found for P2P dialog ${dialog.dialogId}`);
+    return { name, avatar };
+  }
+
+  try {
+    const interlocutorUser = await getP2PUserProfile(interlocutor.userId);
+
+    console.log(
+      `ℹ️ Resolving P2P meta for dialog ${dialog.dialogId} (user: ${currentUserId}, peer: ${interlocutor.userId})`
+    );
+
+    const meta = interlocutorUser?.meta || {};
+    const resolvedName =
+      meta.displayName ||
+      meta.fullName ||
+      `${meta.lastName || ''} ${meta.firstName || ''}`.trim() ||
+      interlocutorUser.name ||
+      meta.nickname ||
+      meta.phone ||
+      interlocutorUser.phone ||
+      interlocutor.userId;
+
+    const resolvedAvatar =
+      meta.avatar?.value ||
+      meta.avatar ||
+      meta.photoUrl ||
+      interlocutorUser.avatar ||
+      null;
+
+    try {
+      await updateP2PPersonalization(
+        dialog.dialogId,
+        currentUserId,
+        interlocutor.userId
+      );
+    } catch (updateError) {
+      console.warn(
+        `Failed to update P2P personalization for dialog ${dialog.dialogId}:`,
+        updateError.message
+      );
+    }
+
+    return {
+      name: name || resolvedName || null,
+      avatar: avatar ?? resolvedAvatar ?? null,
+    };
+  } catch (error) {
+    console.warn(`Failed to resolve interlocutor for dialog ${dialog.dialogId}:`, error.message);
+    return { name, avatar };
+  }
+}
+
+async function processP2PDialog(dialog, currentUser) {
+  const currentUserId =
+    typeof currentUser === 'string' ? currentUser : currentUser?.userId;
+
+  if (!currentUserId) {
+    return dialog;
+  }
+
   const dialogType = dialog.meta?.type || dialog.type;
   
   if (dialogType !== 'p2p') {
@@ -77,72 +168,30 @@ async function processP2PDialog(dialog, currentUserId) {
 
   const nameKey = `p2pDialogNameFor${currentUserId}`;
   const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
-  const fallbackName = extractMetaValue(dialog.meta, `nameFor_${currentUserId}`);
-  const fallbackAvatar = extractMetaValue(dialog.meta, `avatarFor_${currentUserId}`);
+  const personalizedName = extractMetaValue(dialog.meta, nameKey);
+  const personalizedAvatar = extractMetaValue(dialog.meta, avatarKey);
 
-  const personalizedName = extractMetaValue(dialog.meta, nameKey) || fallbackName;
-  const personalizedAvatar = extractMetaValue(dialog.meta, avatarKey) || fallbackAvatar;
-
-  if (personalizedName || personalizedAvatar) {
+  if (personalizedName && personalizedAvatar !== undefined) {
     return {
       ...dialog,
-      name: personalizedName || dialog.name || dialog.dialogName || dialog.dialogId,
-      avatar: personalizedAvatar ?? dialog.avatar ?? null,
+      name: personalizedName,
+      avatar: personalizedAvatar ?? null,
       chatType: 'p2p',
     };
   }
 
-  try {
-    // Find interlocutor (all members except current user)
-    let members = dialog.members || [];
-    
-    // If members not in dialog, get full dialog info
-    if (members.length === 0) {
-      try {
-        const fullDialog = await Chat3Client.getDialog(dialog.dialogId);
-        members = (fullDialog.data || fullDialog).members || [];
-      } catch (error) {
-        console.warn(`Failed to get full dialog info for ${dialog.dialogId}:`, error.message);
-        return { ...dialog, chatType: 'p2p' };
-      }
-    }
-    
-    const interlocutor = members.find(
-      member => member.userId !== currentUserId
-    );
+  const { name, avatar } = await ensureP2PMeta(dialog, currentUserId);
 
-    if (interlocutor && interlocutor.userId) {
-      try {
-        // Get interlocutor's data from Chat3 API
-        const interlocutorData = await Chat3Client.getUser(interlocutor.userId);
-        const interlocutorUser = interlocutorData.data || interlocutorData;
-        
-        // Extract name and avatar
-        const interlocutorName = interlocutorUser.name || interlocutor.userId;
-        const interlocutorAvatar = interlocutorUser.meta?.avatar?.value || 
-                                 interlocutorUser.meta?.avatar || 
-                                 interlocutorUser.avatar || 
-                                 null;
+  const resolvedName = name ?? personalizedName ?? dialog.dialogId;
+  const resolvedAvatar =
+    avatar ?? personalizedAvatar ?? dialog.avatar ?? null;
 
-        // Replace dialog name and avatar with interlocutor's data
-        return {
-          ...dialog,
-          name: interlocutorName,
-          avatar: interlocutorAvatar,
-          chatType: 'p2p',
-        };
-      } catch (error) {
-        console.warn(`Failed to get interlocutor data for dialog ${dialog.dialogId}:`, error.message);
-        return { ...dialog, chatType: 'p2p' };
-      }
-    } else {
-      console.warn(`No interlocutor found for P2P dialog ${dialog.dialogId}`);
-      return { ...dialog, chatType: 'p2p' };
-    }
-  } catch (error) {
-    console.warn(`Error processing P2P dialog ${dialog.dialogId}:`, error.message);
-    return { ...dialog, chatType: 'p2p' };
-  }
+  return {
+    ...dialog,
+    name: resolvedName,
+    avatar: resolvedAvatar,
+    chatType: 'p2p',
+  };
 }
 
 /**
@@ -174,7 +223,7 @@ router.get('/', async (req, res) => {
     const processedDialogs = await Promise.all(
       dialogsWithContext.map(async (dialog) => {
         const dialogType = dialog.meta?.type || dialog.type;
-        const processed = await processP2PDialog(dialog, currentUserId);
+        const processed = await processP2PDialog(dialog, req.user);
         return {
           ...processed,
           chatType: processed.chatType || dialogType || 'group',
@@ -254,7 +303,7 @@ router.get('/search', async (req, res) => {
 
     const processedPersonal = await Promise.all(
       (p2pResult.data || []).map(async (dialog) => {
-        const processed = await processP2PDialog(dialog, currentUserId);
+        const processed = await processP2PDialog(dialog, req.user);
         return {
           ...processed,
           chatType: 'p2p',
@@ -373,7 +422,7 @@ router.post('/', async (req, res) => {
               await updateP2PPersonalization(dialog.dialogId, currentUserId, otherUserId);
               
               // Process P2P dialog to replace name with interlocutor's name
-              const processedDialog = await processP2PDialog(dialog, currentUserId);
+              const processedDialog = await processP2PDialog(dialog, req.user);
               
               // Return existing dialog with processed name
               return res.json({
@@ -651,7 +700,7 @@ router.get('/:dialogId', async (req, res) => {
       joinedAt: dialogData.context?.joinedAt,
     };
 
-    const processed = await processP2PDialog(dialogWithContext, currentUserId);
+    const processed = await processP2PDialog(dialogWithContext, req.user);
     const chatType = processed.chatType || dialogWithContext.meta?.type || dialogWithContext.type || 'group';
 
     res.json({
