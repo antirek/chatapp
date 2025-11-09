@@ -11,38 +11,103 @@ import {
 const router = express.Router();
 
 /**
- * GET /api/users
- * Get list of all users (for creating dialogs)
- * Requires authentication
+ * @openapi
+ * /api/users:
+ *   get:
+ *     tags: [Users]
+ *     summary: List users
+ *     description: Returns list of users excluding current user.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       '200':
+ *         description: List of users
  */
 router.get('/', authenticate, listUsers);
 
 /**
- * GET /api/users/me
- * Get current user profile with avatar from Chat3
- * Requires authentication
+ * @openapi
+ * /api/users/me:
+ *   get:
+ *     tags: [Users]
+ *     summary: Get current user profile
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Current user data
  */
 router.get('/me', authenticate, getCurrentUserProfile);
 
 /**
- * PUT /api/users/me/avatar
- * Update current user avatar
- * Body: { avatar: "data:image/png;base64,..." or "https://..." }
- * Requires authentication
+ * @openapi
+ * /api/users/me/avatar:
+ *   put:
+ *     tags: [Users]
+ *     summary: Update current user's avatar
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - avatar
+ *             properties:
+ *               avatar:
+ *                 type: string
+ *                 description: Base64 data URL or HTTP(S) link
+ *     responses:
+ *       '200':
+ *         description: Avatar updated
  */
 router.put('/me/avatar', authenticate, updateCurrentUserAvatar);
 
 /**
- * DELETE /api/users/me/avatar
- * Delete current user avatar
- * Requires authentication
+ * @openapi
+ * /api/users/me/avatar:
+ *   delete:
+ *     tags: [Users]
+ *     summary: Delete current user's avatar
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Avatar removed
  */
 router.delete('/me/avatar', authenticate, deleteCurrentUserAvatar);
 
 /**
- * GET /api/users/:userId
- * Get user by userId (with avatar from Chat3)
- * Requires authentication
+ * @openapi
+ * /api/users/{userId}:
+ *   get:
+ *     tags: [Users]
+ *     summary: Get user by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: User data
+ *       '404':
+ *         description: User not found
  */
 router.get('/:userId', authenticate, getUserById);
 

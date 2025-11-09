@@ -2,6 +2,10 @@ import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
+import swaggerUi from 'swagger-ui-express';
+import swaggerJsdoc from 'swagger-jsdoc';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import config from './src/config/index.js';
 import { connectDB } from './src/db/index.js';
 import { initializeWebSocket } from './src/websocket/index.js';
@@ -16,11 +20,53 @@ import userRoutes from './src/routes/users.js';
 const app = express();
 const server = createServer(app);
 
+// Swagger/OpenAPI setup
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.3',
+    info: {
+      title: 'ChatPApp Backend API',
+      description:
+        'REST API endpoints for authentication, dialogs, messages and users in the ChatPApp project.',
+      version: '1.0.0',
+    },
+    servers: [
+      {
+        url: `http://localhost:${config.port}`,
+        description: 'Local development server',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
+  },
+  apis: [
+    path.resolve(__dirname, './src/routes/*.js'),
+    path.resolve(__dirname, './src/controllers/*.js'),
+  ],
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// API docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/openapi.json', (req, res) => {
+  res.json(swaggerSpec);
+});
 
 // Request logging in development
 if (config.nodeEnv === 'development') {

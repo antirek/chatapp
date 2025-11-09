@@ -16,51 +16,191 @@ const router = express.Router();
 router.use(authenticate);
 
 /**
- * GET /api/messages/dialog/:dialogId
- * Get messages for a dialog
- * Returns messages with statuses for all participants (needed for read indicators)
- * 
- * Note: Using getUserDialogMessages for user-specific context (better performance),
- * but we still need statuses for all participants to show ✓✓ indicators.
- * The user context endpoint provides user-specific data but may not include all statuses.
+ * @openapi
+ * /api/messages/dialog/{dialogId}:
+ *   get:
+ *     tags: [Messages]
+ *     summary: Get messages for dialog
+ *     description: Returns messages with statuses for all participants.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       '200':
+ *         description: List of messages
  */
 router.get('/dialog/:dialogId', getDialogMessages);
 
 /**
- * POST /api/messages/dialog/:dialogId
- * Send message to dialog
- * Body: { content: "message text", type?: "text", meta?: {} }
+ * @openapi
+ * /api/messages/dialog/{dialogId}:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Send message to dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               content:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *               meta:
+ *                 type: object
+ *     responses:
+ *       '201':
+ *         description: Message created
  */
 router.post('/dialog/:dialogId', sendDialogMessage);
 
 /**
- * GET /api/messages/:messageId
- * Get message by ID
+ * @openapi
+ * /api/messages/{messageId}:
+ *   get:
+ *     tags: [Messages]
+ *     summary: Get message by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Message data
+ *       '404':
+ *         description: Message not found
  */
 router.get('/:messageId', getMessageById);
 
 /**
- * POST /api/messages/:messageId/status/:status
- * Update message status (read/delivered)
+ * @openapi
+ * /api/messages/{messageId}/status/{status}:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Update message status
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: status
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [read, delivered]
+ *     responses:
+ *       '200':
+ *         description: Status updated
  */
 router.post('/:messageId/status/:status', updateMessageStatus);
 
 /**
- * GET /api/messages/:messageId/reactions
- * Get reactions for a message
+ * @openapi
+ * /api/messages/{messageId}/reactions:
+ *   get:
+ *     tags: [Messages]
+ *     summary: Get reactions for message
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Reactions list
  */
 router.get('/:messageId/reactions', getMessageReactions);
 
 /**
- * POST /api/messages/:messageId/reactions
- * Add reaction to message
- * Body: { reaction: "👍", userId: "userId" }
+ * @openapi
+ * /api/messages/{messageId}/reactions:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Add reaction to message
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reaction
+ *             properties:
+ *               reaction:
+ *                 type: string
+ *                 example: "👍"
+ *     responses:
+ *       '200':
+ *         description: Reaction added
  */
 router.post('/:messageId/reactions', addReaction);
 
 /**
- * DELETE /api/messages/:messageId/reactions/:reaction
- * Remove reaction from message
+ * @openapi
+ * /api/messages/{messageId}/reactions/{reaction}:
+ *   delete:
+ *     tags: [Messages]
+ *     summary: Remove reaction from message
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: reaction
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Reaction removed
  */
 router.delete('/:messageId/reactions/:reaction', removeReaction);
 
