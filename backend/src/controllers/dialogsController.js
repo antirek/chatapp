@@ -4,6 +4,7 @@ import {
   updateP2PPersonalization,
   getP2PUserProfile,
 } from '../utils/p2pPersonalization.js';
+import { resolveNameFromMeta } from '../utils/nameResolver.js';
 
 const MIN_SEARCH_LENGTH = 2;
 
@@ -38,6 +39,16 @@ function createEmptyResult(page, limit) {
       pages: 0,
     },
   };
+}
+
+async function resolveUserName(userId, fallbackName) {
+  try {
+    const profile = await getP2PUserProfile(userId);
+    return resolveNameFromMeta(profile.meta, profile.name || fallbackName, userId);
+  } catch (error) {
+    console.warn(`Failed to resolve user ${userId}:`, error.message);
+    return fallbackName || userId;
+  }
 }
 
 async function safeGetUserDialogs(userId, params) {
@@ -604,17 +615,19 @@ export async function joinPublicDialog(req, res) {
 
     await Chat3Client.addDialogMember(dialogId, currentUserId);
 
-    try {
-      const userResponse = await Chat3Client.getUser(currentUserId);
-      const userName = userResponse?.data?.name || currentUserId;
+    const userName = await resolveUserName(currentUserId, req.user?.name || null);
 
+    try {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вошел в группу`,
         senderId: 'system',
         type: mapOutgoingMessageType('system'),
       });
     } catch (error) {
-      console.warn(`Failed to send system notification for user ${currentUserId}:`, error.message);
+      console.warn(
+        `Failed to send system notification for user ${currentUserId}:`,
+        error.message,
+      );
     }
 
     const updatedDialog = await Chat3Client.getDialog(dialogId);
@@ -808,10 +821,9 @@ export async function addDialogMember(req, res) {
 
     await Chat3Client.addDialogMember(dialogId, userId);
 
-    try {
-      const userResponse = await Chat3Client.getUser(userId);
-      const userName = userResponse?.data?.name || userId;
+    const userName = await resolveUserName(userId, null);
 
+    try {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вошел в группу`,
         senderId: 'system',
@@ -837,13 +849,7 @@ export async function removeDialogMember(req, res) {
   try {
     const { dialogId, userId } = req.params;
 
-    let userName = userId;
-    try {
-      const userResponse = await Chat3Client.getUser(userId);
-      userName = userResponse?.data?.name || userId;
-    } catch (error) {
-      console.warn(`Failed to get user info for ${userId}:`, error.message);
-    }
+    const userName = await resolveUserName(userId, null);
 
     await Chat3Client.removeDialogMember(dialogId, userId);
 
