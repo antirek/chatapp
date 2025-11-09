@@ -41,7 +41,7 @@ function createEmptyResult(page, limit) {
   };
 }
 
-async function resolveUserName(userId, fallbackName) {
+export async function resolveUserName(userId, fallbackName) {
   try {
     const profile = await getP2PUserProfile(userId);
     return resolveNameFromMeta(profile.meta, profile.name || fallbackName, userId);

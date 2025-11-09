@@ -23,6 +23,7 @@ export interface Dialog {
   dialogId: string
   name?: string // Chat3 format
   dialogName?: string // Legacy format
+  avatar?: string | null
   unreadCount: number
   lastSeenAt?: string | number
   lastMessageAt?: string | number

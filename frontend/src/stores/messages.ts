@@ -9,14 +9,21 @@ import { useDialogsStore } from './dialogs'
 
 let typingListenerRegistered = false
 
+interface TypingUserEntry {
+  userId: string
+  name?: string
+  expiresAt: number
+}
+
 export const useMessagesStore = defineStore('messages', () => {
   const messages = ref<Message[]>([])
-  const typingUsersByDialog = ref<Map<string, Set<string>>>(new Map())
+  const typingUsersByDialog = ref<Map<string, Map<string, TypingUserEntry>>>(new Map())
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const typingTimeouts = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
   const lastTypingSignalAt = new Map<string, number>()
   const TYPING_THROTTLE_MS = 800
+  const dialogsStore = useDialogsStore()
 
   const sortedMessages = computed(() => {
     return [...messages.value].sort((a, b) => {
@@ -207,16 +214,19 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
-  function updateTypingSet(dialogId: string, updater: (set: Set<string>) => void) {
+  function updateTypingMap(dialogId: string, updater: (map: Map<string, TypingUserEntry>) => void) {
     const currentMap = typingUsersByDialog.value
-    const currentSet = new Set(currentMap.get(dialogId) ?? [])
-    updater(currentSet)
     const nextMap = new Map(currentMap)
-    if (currentSet.size === 0) {
+    const currentEntries = new Map(currentMap.get(dialogId) ?? [])
+
+    updater(currentEntries)
+
+    if (currentEntries.size === 0) {
       nextMap.delete(dialogId)
     } else {
-      nextMap.set(dialogId, currentSet)
+      nextMap.set(dialogId, currentEntries)
     }
+
     typingUsersByDialog.value = nextMap
   }
 
@@ -227,13 +237,47 @@ export const useMessagesStore = defineStore('messages', () => {
     return typingTimeouts.get(dialogId)!
   }
 
-  function addTypingUser(dialogId: string, userId: string, expiresInMs: number = 5000) {
+  function inferTypingUserName(dialogId: string, userId: string, providedName?: string): string | undefined {
+    const nameCandidate = providedName?.trim()
+    if (nameCandidate) {
+      return nameCandidate
+    }
+
+    const dialogFromCurrent = dialogsStore.currentDialog && dialogsStore.currentDialog.dialogId === dialogId
+      ? dialogsStore.currentDialog
+      : null
+
+    const dialogFromList = dialogsStore.dialogs.find((dialog) => dialog.dialogId === dialogId)
+    const candidates = [dialogFromCurrent, dialogFromList].filter(Boolean)
+
+    for (const candidate of candidates) {
+      if (!candidate) continue
+
+      const member = candidate.members?.find((participant) => participant.userId === userId)
+      if (member) {
+        return member.name || member.phone || undefined
+      }
+    }
+
+    return nameCandidate
+  }
+
+  function addTypingUser(dialogId: string, userId: string, expiresInMs: number = 5000, userName?: string) {
     const authStore = useAuthStore()
     if (userId === authStore.user?.userId) {
       return
     }
 
-    updateTypingSet(dialogId, (set) => set.add(userId))
+    const expiresAt = Date.now() + expiresInMs
+    const resolvedName = inferTypingUserName(dialogId, userId, userName)
+
+    updateTypingMap(dialogId, (entryMap) => {
+      entryMap.set(userId, {
+        userId,
+        name: resolvedName,
+        expiresAt
+      })
+    })
 
     const dialogTimeouts = ensureTimeoutMap(dialogId)
     if (dialogTimeouts.has(userId)) {
@@ -248,8 +292,8 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   function removeTypingUser(dialogId: string, userId: string) {
-    updateTypingSet(dialogId, (set) => {
-      set.delete(userId)
+    updateTypingMap(dialogId, (entryMap) => {
+      entryMap.delete(userId)
     })
 
     const dialogTimeouts = typingTimeouts.get(dialogId)
@@ -275,7 +319,6 @@ export const useMessagesStore = defineStore('messages', () => {
   if (!typingListenerRegistered) {
     typingListenerRegistered = true
     websocket.on('typing:update', (event: TypingEvent) => {
-      const dialogsStore = useDialogsStore()
       const currentDialogId = dialogsStore.currentDialog?.dialogId
       const eventDialogId = event.dialogId
       if (!eventDialogId || eventDialogId !== currentDialogId) {
@@ -288,16 +331,23 @@ export const useMessagesStore = defineStore('messages', () => {
       if (import.meta.env.DEV) {
         console.log('[messagesStore] typing:update', event)
       }
-      addTypingUser(eventDialogId, event.userId, expiresInMs)
+      addTypingUser(eventDialogId, event.userId, expiresInMs, event.userName)
     })
   }
 
-  function getTypingUsers(dialogId: string): Set<string> {
-    return new Set(typingUsersByDialog.value.get(dialogId) ?? [])
+  function getTypingUsers(dialogId: string): Array<{ userId: string; name?: string }> {
+    const dialogEntries = typingUsersByDialog.value.get(dialogId)
+    if (!dialogEntries) {
+      return []
+    }
+    return Array.from(dialogEntries.values()).map(({ userId, name }) => ({
+      userId,
+      name
+    }))
   }
 
   function clearTypingForDialog(dialogId: string) {
-    updateTypingSet(dialogId, (set) => set.clear())
+    updateTypingMap(dialogId, (entryMap) => entryMap.clear())
     const dialogTimeouts = typingTimeouts.get(dialogId)
     if (dialogTimeouts) {
       dialogTimeouts.forEach((timeout) => clearTimeout(timeout))
@@ -338,14 +388,19 @@ if (import.meta.env.DEV) {
   window.__typingStore = {
     get typingUsers() {
       const store = useMessagesStore() as any
-      const map: Map<string, Set<string>> = store.typingUsersByDialog
-      return Array.from(map.entries()).reduce<Record<string, string[]>>((acc, [dialogId, set]) => {
-        acc[dialogId] = Array.from(set)
+      const map: Map<string, Map<string, TypingUserEntry>> = store.typingUsersByDialog
+      return Array.from(map.entries()).reduce<Record<string, Array<{ userId: string; name?: string; expiresAt: number }>>>(
+        (acc, [dialogId, entries]) => {
+          acc[dialogId] = Array.from(entries.values()).map((entry) => ({
+            userId: entry.userId,
+            name: entry.name,
+            expiresAt: entry.expiresAt
+          }))
         return acc
       }, {})
     },
-    addTypingUser: (dialogId: string, userId: string, expiresInMs?: number) => {
-      ;(useMessagesStore() as any).addTypingUser(dialogId, userId, expiresInMs)
+    addTypingUser: (dialogId: string, userId: string, expiresInMs?: number, userName?: string) => {
+      ;(useMessagesStore() as any).addTypingUser(dialogId, userId, expiresInMs, userName)
     },
     removeTypingUser: (dialogId: string, userId: string) => {
       ;(useMessagesStore() as any).removeTypingUser(dialogId, userId)

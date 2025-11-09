@@ -97,7 +97,13 @@
                       {{ formatTime(dialog.lastMessageAt) }}
                     </span>
                   </div>
-                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                  <p
+                    v-if="getTypingPreview(dialog)"
+                    class="text-sm text-primary-600 font-medium truncate"
+                  >
+                    {{ getTypingPreview(dialog) }}
+                  </p>
+                  <p v-else-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
                     {{ dialog.lastMessage.content }}
                   </p>
                 </div>
@@ -154,7 +160,13 @@
                       {{ formatTime(dialog.lastMessageAt) }}
                     </span>
                   </div>
-                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                  <p
+                    v-if="getTypingPreview(dialog)"
+                    class="text-sm text-primary-600 font-medium truncate"
+                  >
+                    {{ getTypingPreview(dialog) }}
+                  </p>
+                  <p v-else-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
                     {{ dialog.lastMessage.content }}
                   </p>
                 </div>
@@ -211,7 +223,13 @@
                       {{ formatTime(dialog.lastMessageAt) }}
                     </span>
                   </div>
-                  <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+                  <p
+                    v-if="getTypingPreview(dialog)"
+                    class="text-sm text-primary-600 font-medium truncate"
+                  >
+                    {{ getTypingPreview(dialog) }}
+                  </p>
+                  <p v-else-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
                     {{ dialog.lastMessage.content }}
                   </p>
                   <p
@@ -301,7 +319,13 @@
                 </span>
               </div>
 
-              <p v-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
+              <p
+                v-if="getTypingPreview(dialog)"
+                class="text-sm text-primary-600 font-medium truncate"
+              >
+                {{ getTypingPreview(dialog) }}
+              </p>
+              <p v-else-if="dialog.lastMessage" class="text-sm text-gray-600 truncate">
                 {{ dialog.lastMessage.content }}
               </p>
             </div>
@@ -342,15 +366,18 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDialogsStore } from '@/stores/dialogs'
+import { useMessagesStore } from '@/stores/messages'
 import { useAuthStore } from '@/stores/auth'
 import Avatar from './Avatar.vue'
 import type { Dialog } from '@/types'
+import { formatTypingUsers } from '@/utils/typing'
 
 const emit = defineEmits<{
   select: [dialogId: string]
 }>()
 
 const dialogsStore = useDialogsStore()
+const messagesStore = useMessagesStore()
 const authStore = useAuthStore()
 const { isSearching, searchError, searchResults, lastSearchTerm, isLoadingMore, hasMoreDialogs, currentFilter } = storeToRefs(dialogsStore)
 
@@ -563,6 +590,21 @@ async function performSearch(term: string) {
   } catch (error) {
     console.error('Failed to search dialogs:', error)
   }
+}
+
+function getTypingPreview(dialog: Dialog): string | null {
+  const typingEntries = messagesStore.getTypingUsers(dialog.dialogId)
+  if (typingEntries.length === 0) {
+    return null
+  }
+
+  if (!isGroupChat(dialog)) {
+    return 'печатает...'
+  }
+
+  const names = typingEntries.map((entry) => entry.name?.trim() || `Пользователь ${entry.userId}`)
+  const formatted = formatTypingUsers(names)
+  return formatted || 'печатают...'
 }
 
 function getDialogAvatar(dialog: Dialog): string | null {

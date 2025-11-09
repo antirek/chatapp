@@ -199,13 +199,14 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
+import { formatTypingUsers } from '@/utils/typing'
 import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
 import UserInfoModal from './UserInfoModal.vue'
 import GroupInfoModal from './GroupInfoModal.vue'
 import AddGroupMembersModal from './AddGroupMembersModal.vue'
 import Avatar from './Avatar.vue'
-import type { Dialog, Message } from '@/types'
+import type { Dialog, Message, SendMessageData } from '@/types'
 import { normalizeMessageType } from '@/utils/messageType'
 
 const props = defineProps<{
@@ -258,13 +259,21 @@ const isGroupChat = computed(() => {
   return chatType === 'group'
 })
 
-const typingUsersSet = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
+const typingUsers = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
 
 const typingUsersText = computed(() => {
-  const size = typingUsersSet.value.size
-  if (size === 0) return ''
-  if (size === 1) return 'печатает...'
-  return 'печатают...'
+  const entries = typingUsers.value
+  if (entries.length === 0) {
+    return ''
+  }
+
+  if (!isGroupChat.value) {
+    return 'печатает...'
+  }
+
+  const names = entries.map((entry) => entry.name?.trim() || `Пользователь ${entry.userId}`)
+  const formatted = formatTypingUsers(names)
+  return formatted || 'печатают...'
 })
 
 // Load other user info and current user avatar on mount
@@ -708,7 +717,7 @@ async function handleMembersAdded() {
   await loadExistingMemberIds()
   
   // Reload messages to get any updates
-  await messagesStore.loadMessages(props.dialog.dialogId)
+  await messagesStore.fetchMessages(props.dialog.dialogId)
 }
 
 function handleLeftGroup() {
