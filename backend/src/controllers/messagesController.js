@@ -1,112 +1,5 @@
 import Chat3Client from '../services/Chat3Client.js';
 import { mapOutgoingMessageType } from '../utils/messageType.js';
-import { getP2PUserProfile } from '../utils/p2pPersonalization.js';
-import { resolveNameFromMeta } from '../utils/nameResolver.js';
-
-function resolveAvatarFromMeta(meta, fallbackAvatar) {
-  if (!meta) {
-    return fallbackAvatar ?? null;
-  }
-
-  if (meta.avatar) {
-    if (typeof meta.avatar === 'string') {
-      return meta.avatar;
-    }
-    if (typeof meta.avatar === 'object' && meta.avatar !== null && 'value' in meta.avatar) {
-      return meta.avatar.value ?? fallbackAvatar ?? null;
-    }
-  }
-
-  if (meta.photoUrl) {
-    return meta.photoUrl;
-  }
-
-  return fallbackAvatar ?? null;
-}
-
-async function enrichMessages(messages = [], currentUser) {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return messages;
-  }
-
-  const senderCache = new Map();
-
-  if (currentUser?.userId) {
-    senderCache.set(currentUser.userId, {
-      userId: currentUser.userId,
-      name: currentUser.name || currentUser.userId,
-      phone: currentUser.phone || null,
-      avatar: null,
-    });
-  }
-
-  return Promise.all(
-    messages.map(async (message) => {
-      if (!message || typeof message !== 'object') {
-        return message;
-      }
-
-      const senderId = message.senderId;
-
-      if (!senderId || senderId === 'system') {
-        return message;
-      }
-
-      const existingName = message.sender?.name;
-      if (existingName && existingName !== senderId) {
-        return message;
-      }
-
-      let cached = senderCache.get(senderId);
-
-      if (!cached) {
-        const contextUser = message.context?.userInfo;
-        if (contextUser) {
-          cached = {
-            userId: contextUser.userId || senderId,
-            name: contextUser.name
-              || resolveNameFromMeta(contextUser.meta, null, senderId),
-            phone: contextUser.phone || null,
-            avatar: resolveAvatarFromMeta(contextUser.meta, contextUser.avatar),
-          };
-        }
-      }
-
-      if (!cached) {
-        try {
-          const profile = await getP2PUserProfile(senderId);
-          cached = {
-            userId: profile.userId || senderId,
-            name: resolveNameFromMeta(profile.meta, profile.name, senderId),
-            phone: profile.phone || null,
-            avatar: resolveAvatarFromMeta(profile.meta, profile.avatar),
-          };
-        } catch (error) {
-          console.warn(`Failed to resolve sender info for ${senderId}:`, error.message);
-          cached = {
-            userId: senderId,
-            name: senderId,
-            phone: null,
-            avatar: null,
-          };
-        }
-      }
-
-      senderCache.set(senderId, cached);
-
-      return {
-        ...message,
-        sender: {
-          ...(message.sender || {}),
-          userId: cached.userId || senderId,
-          name: cached.name || senderId,
-          phone: cached.phone ?? message.sender?.phone ?? null,
-          avatar: cached.avatar ?? message.sender?.avatar ?? null,
-        },
-      };
-    }),
-  );
-}
 
 export async function getDialogMessages(req, res) {
   try {
@@ -136,13 +29,10 @@ export async function getDialogMessages(req, res) {
       });
     }
 
-    const messages = Array.isArray(result.data) ? result.data : [];
-    const enrichedMessages = await enrichMessages(messages, req.user);
-
     return res.json({
       success: true,
       ...result,
-      data: enrichedMessages,
+      data: Array.isArray(result.data) ? result.data : [],
     });
   } catch (error) {
     return res.status(500).json({
@@ -199,11 +89,9 @@ export async function sendDialogMessage(req, res) {
 
     const result = await Chat3Client.createMessage(dialogId, messagePayload);
 
-    const messageData = result?.data ? await enrichMessages([result.data], req.user) : [result.data];
-
     return res.status(201).json({
       success: true,
-      data: messageData[0],
+      data: result?.data,
     });
   } catch (error) {
     return res.status(500).json({
