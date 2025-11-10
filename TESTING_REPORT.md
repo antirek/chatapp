@@ -159,7 +159,7 @@ POST /api/dialogs
 
 **Backend лог:**
 ```
-POST /api/messages/dialog/dlg_my7irb3xfc5ptcb8obu7
+POST /api/dialog/dlg_my7irb3xfc5ptcb8obu7/messages
 [Axios][Response] 201:Created
 Message created successfully
 ```
@@ -287,8 +287,8 @@ Message created successfully
 - POST /api/auth/verify-code ✅
 - GET /api/dialogs ✅
 - POST /api/dialogs ✅
-- GET /api/messages/dialog/:id ✅
-- POST /api/messages/dialog/:id ✅ (x2)
+- GET /api/dialog/:id/messages ✅
+- POST /api/dialog/:id/messages ✅ (x2)
 
 **WebSocket события:**
 - connect ✅

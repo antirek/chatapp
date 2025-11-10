@@ -37,7 +37,7 @@ io.emitNewMessage(dialogId, result.data);
 User 1 отправляет сообщение
          │
          ▼
-Backend: POST /api/messages/dialog/:id
+Backend: POST /api/dialog/:id/messages
          │
          ▼
 Chat3 API: createMessage()

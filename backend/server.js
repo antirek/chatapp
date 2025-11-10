@@ -14,6 +14,7 @@ import { initializeWebSocket } from './src/websocket/index.js';
 import authRoutes from './src/routes/auth.js';
 import dialogRoutes from './src/routes/dialogs.js';
 import messageRoutes from './src/routes/messages.js';
+import dialogMessageRoutes from './src/routes/dialogMessages.js';
 import userRoutes from './src/routes/users.js';
 
 // Initialize Express app
@@ -89,6 +90,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/dialogs', dialogRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/dialog', dialogMessageRoutes);
 app.use('/api/users', userRoutes);
 
 // 404 handler

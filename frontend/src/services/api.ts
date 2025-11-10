@@ -151,12 +151,12 @@ class ApiService {
     page?: number
     limit?: number
   }): Promise<PaginatedResponse<Message>> {
-    const { data } = await this.api.get(`/messages/dialog/${dialogId}`, { params })
+    const { data } = await this.api.get(`/dialog/${dialogId}/messages`, { params })
     return data
   }
 
   async sendMessage(dialogId: string, messageData: SendMessageData): Promise<ApiResponse<Message>> {
-    const { data } = await this.api.post(`/messages/dialog/${dialogId}`, messageData)
+    const { data } = await this.api.post(`/dialog/${dialogId}/messages`, messageData)
     return data
   }
 

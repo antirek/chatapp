@@ -23,7 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **CRITICAL: Message Send Response** - Changed field name from `message` to `data`
-  - POST /api/messages/dialog/:id now returns `data` instead of `message`
+  - POST /api/dialog/:id/messages now returns `data` instead of `message`
   - Consistent with other API responses
   - Frontend can now display sent messages immediately
 - **Dialog Creation Response** - Now returns full transformed data structure

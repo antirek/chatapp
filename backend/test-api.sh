@@ -140,7 +140,7 @@ echo ""
 
 # Send message
 echo "7️⃣  Sending message to dialog..."
-SEND_MESSAGE_RESPONSE=$(curl -s -X POST "$BASE_URL/api/messages/dialog/$DIALOG_ID" \
+SEND_MESSAGE_RESPONSE=$(curl -s -X POST "$BASE_URL/api/dialog/$DIALOG_ID/messages" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"content":"Hello! This is a test message.","type":"text"}' \
@@ -162,7 +162,7 @@ echo ""
 
 # Get messages
 echo "8️⃣  Getting dialog messages..."
-GET_MESSAGES_RESPONSE=$(curl -s "$BASE_URL/api/messages/dialog/$DIALOG_ID" \
+GET_MESSAGES_RESPONSE=$(curl -s "$BASE_URL/api/dialog/$DIALOG_ID/messages" \
     -H "Authorization: Bearer $TOKEN" \
     -w "\n%{http_code}")
 

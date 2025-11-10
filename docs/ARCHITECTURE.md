@@ -180,7 +180,7 @@ sequenceDiagram
     participant RabbitMQ_Events
     participant Worker
 
-    Client->>API: POST /api/messages/dialog/{dialogId}<br/>Authorization: Bearer {token}<br/>{content, type, meta}
+    Client->>API: POST /api/dialog/{dialogId}/messages<br/>Authorization: Bearer {token}<br/>{content, type, meta}
     
     API->>AuthMiddleware: Verify JWT token
     AuthMiddleware->>AuthMiddleware: Decode token → userId
@@ -626,7 +626,7 @@ sequenceDiagram
 
     rect rgb(230, 247, 255)
         Note over User_A,Chat3_API: Создание сообщения
-        User_A->>API: POST /api/messages/dialog/{id}<br/>{content: "Hello!"}
+        User_A->>API: POST /api/dialog/{id}/messages<br/>{content: "Hello!"}
         API->>Chat3_API: Create message
         Chat3_API->>Chat3_API: Save message to DB
         Chat3_API->>RabbitMQ: Publish Event<br/>message.create

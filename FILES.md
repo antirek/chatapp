@@ -396,7 +396,7 @@ class ApiService {
   private api: AxiosInstance
   
   async sendMessage(dialogId: string, data: SendMessageData) {
-    const response = await this.api.post(`/messages/dialog/${dialogId}`, data)
+    const response = await this.api.post(`/dialog/${dialogId}/messages`, data)
     return response.data
   }
 }

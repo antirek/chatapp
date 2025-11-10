@@ -22,7 +22,7 @@ router.use(authenticate);
  * @openapi
  * /api/dialogs:
  *   get:
- *     tags: [Dialogs]
+ *     tags: [Dialog Members]
  *     summary: List dialogs for current user
  *     security:
  *       - bearerAuth: []
@@ -59,7 +59,7 @@ router.get('/', getDialogs);
  * @openapi
  * /api/dialogs/search:
  *   get:
- *     tags: [Dialogs]
+ *     tags: [Dialog Members]
  *     summary: Search dialogs by name
  *     security:
  *       - bearerAuth: []
@@ -81,7 +81,7 @@ router.get('/search', searchDialogs);
  * @openapi
  * /api/dialogs:
  *   post:
- *     tags: [Dialogs]
+ *     tags: [Dialog Members]
  *     summary: Create a new dialog
  *     security:
  *       - bearerAuth: []

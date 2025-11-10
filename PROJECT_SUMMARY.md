@@ -346,7 +346,7 @@ Client → WebSocket.connect(token) → подписка на RabbitMQ
 
 ### Отправка сообщения:
 ```
-Client → POST /api/messages/dialog/{id} → Chat3 API → Event
+Client → POST /api/dialog/{id}/messages → Chat3 API → Event
 Event → RabbitMQ Events → Update Worker → Updates
 Updates → RabbitMQ Updates → Our Backend → WebSocket → Clients
 ```
@@ -397,8 +397,8 @@ Chat3 Update Worker → RabbitMQ (user.{userId}.*)
 - `DELETE /api/dialogs/:id/members/:userId` - удалить участника
 
 ### Messages (7 endpoints):
-- `GET /api/messages/dialog/:id` - сообщения диалога
-- `POST /api/messages/dialog/:id` - отправить сообщение
+- `GET /api/dialog/:id/messages` - сообщения диалога
+- `POST /api/dialog/:id/messages` - отправить сообщение
 - `GET /api/messages/:id` - получить сообщение
 - `POST /api/messages/:id/status/:status` - обновить статус
 - `GET /api/messages/:id/reactions` - получить реакции

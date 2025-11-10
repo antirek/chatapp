@@ -88,7 +88,7 @@ Authorization: Bearer {{token}}
 ### 8. Получить сообщения диалога
 ### ============================================
 
-GET {{baseUrl}}/api/messages/dialog/{{dialogId}}?page=1&limit=50
+GET {{baseUrl}}/api/dialog/{{dialogId}}/messages?page=1&limit=50
 Authorization: Bearer {{token}}
 
 ### ============================================
@@ -96,7 +96,7 @@ Authorization: Bearer {{token}}
 ### ============================================
 
 # @name sendMessage
-POST {{baseUrl}}/api/messages/dialog/{{dialogId}}
+POST {{baseUrl}}/api/dialog/{{dialogId}}/messages
 Authorization: Bearer {{token}}
 Content-Type: application/json
 

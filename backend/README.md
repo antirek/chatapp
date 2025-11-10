@@ -153,14 +153,14 @@ Authorization: Bearer <jwt-token>
 
 ### Сообщения
 
-#### GET /api/messages/dialog/:dialogId
+#### GET /api/dialog/:dialogId/messages
 Получить сообщения диалога
 
 **Query params:**
 - `page` - номер страницы (default: 1)
 - `limit` - количество на странице (default: 50)
 
-#### POST /api/messages/dialog/:dialogId
+#### POST /api/dialog/:dialogId/messages
 Отправить сообщение в диалог
 
 **Request:**

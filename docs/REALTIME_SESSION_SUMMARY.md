@@ -227,7 +227,7 @@ isOwnMessage: usr_qk2ddpnx === usr_e86m1drv = false
 User 1 sends message
          │
          ▼
-    POST /api/messages/dialog/:id
+    POST /api/dialog/:id/messages
          │
          ▼
 backend/src/routes/messages.js
