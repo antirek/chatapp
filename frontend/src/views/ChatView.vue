@@ -292,7 +292,6 @@ const handleTypingUpdate = (event: any) => {
 onUnmounted(() => {
   // Clean up WebSocket listeners
   websocket.off('chat3:update', handleChat3Update)
-  websocket.off('message:new', handleNewMessage)
   websocket.off('message:update', handleMessageUpdate)
   websocket.off('dialog:update', handleDialogUpdate)
   websocket.off('typing:update', handleTypingUpdate)
@@ -305,8 +304,6 @@ onUnmounted(() => {
 function setupWebSocketListeners() {
   // ✅ RabbitMQ Chat3 Updates
   websocket.on('chat3:update', handleChat3Update)
-  
-  websocket.on('message:new', handleNewMessage)
   websocket.on('message:update', handleMessageUpdate)
   websocket.on('dialog:update', handleDialogUpdate)
   websocket.on('typing:update', handleTypingUpdate)
@@ -402,40 +399,51 @@ function handleNewMessage(message: any) {
 async function handleMessageUpdate(update: any) {
   // Handle message updates (reactions, status, etc.)
   console.log('📝 handleMessageUpdate called:', update)
-  if (update.data) {
-    console.log('📝 update.data:', update.data)
-    const messageId = update.data.messageId || update.data._id
-    if (messageId) {
-      // For status updates, fetch full message to get updated statuses array
-      if (update.eventType === 'message.status.update') {
-        try {
-          console.log('🔄 Fetching full message for status update:', messageId)
-          const response = await api.getMessage(messageId)
-          if (response.success && response.data) {
-            console.log('✅ Got full message with statuses:', response.data.statuses)
-            messagesStore.updateMessage(messageId, response.data)
-            
-            // Decrement unread count if current user marked message as read
-            if (update.data.userId === authStore.user?.userId && update.data.status === 'read' && response.data.dialogId) {
-              // Check if it's not the current dialog (already at 0 unread)
-              if (response.data.dialogId !== dialogsStore.currentDialog?.dialogId) {
-                const dialog = dialogsStore.dialogs.find(d => d.dialogId === response.data.dialogId)
-                if (dialog && dialog.unreadCount > 0) {
-                  dialogsStore.updateDialogUnreadCount(response.data.dialogId, dialog.unreadCount - 1)
-                }
-              }
-            }
+  if (!update?.data) {
+    return
+  }
+
+  const payload = update.data
+  const payloadMessage = payload.message || payload
+  const messageId = payload.messageId || payload._id || payloadMessage?.messageId || payloadMessage?._id
+
+  if (!messageId) {
+    console.warn('⚠️ handleMessageUpdate: messageId is missing in payload', update)
+    return
+  }
+
+  const existingMessage = messagesStore.messages.find(
+    (m) => m.messageId === messageId || m._id === messageId
+  )
+
+  if (update.eventType === 'message.status.update') {
+    const normalizedMessage = payloadMessage
+    if (!normalizedMessage) {
+      console.warn('⚠️ handleMessageUpdate: message payload is empty for status update', update)
+      return
+    }
+
+    messagesStore.updateMessage(messageId, normalizedMessage)
+
+    const currentUserId = authStore.user?.userId
+    const updatedDialogId = normalizedMessage.dialogId
+
+    if (currentUserId && updatedDialogId) {
+      const previousStatus = existingMessage?.statuses?.find((s: any) => s.userId === currentUserId)?.status
+      const updatedStatus = normalizedMessage.statuses?.find((s: any) => s.userId === currentUserId)?.status
+
+      if (previousStatus !== 'read' && updatedStatus === 'read') {
+        if (updatedDialogId !== dialogsStore.currentDialog?.dialogId) {
+          const dialog = dialogsStore.dialogs.find((d) => d.dialogId === updatedDialogId)
+          if (dialog && dialog.unreadCount > 0) {
+            dialogsStore.updateDialogUnreadCount(updatedDialogId, dialog.unreadCount - 1)
           }
-        } catch (error) {
-          console.error('Failed to fetch message for status update:', error)
-          // Fallback to partial update
-          messagesStore.updateMessage(messageId, update.data)
         }
-      } else {
-        console.log('📝 Calling updateMessage with messageId:', messageId, 'updates:', update.data)
-        messagesStore.updateMessage(messageId, update.data)
       }
     }
+  } else {
+    console.log('📝 Updating message with payload:', payloadMessage)
+    messagesStore.updateMessage(messageId, payloadMessage)
   }
 }
 
