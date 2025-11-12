@@ -324,6 +324,11 @@ const typingUsersText = computed(() => {
   return formatted || 'печатают...'
 })
 
+// Scroll management for infinite scroll (declare before watch)
+let previousScrollHeight = 0
+let isUserNearBottom = true
+let isInitialLoad = true
+
 // Load messages when dialog changes
 watch(() => props.dialog?.dialogId, async (dialogId) => {
   if (dialogId) {
@@ -367,11 +372,6 @@ async function loadCurrentUserAvatar() {
     console.error('Failed to load current user avatar:', error)
   }
 }
-
-// Scroll management for infinite scroll
-let previousScrollHeight = 0
-let isUserNearBottom = true
-let isInitialLoad = true
 
 watch(() => messagesStore.messages.length, async () => {
   await nextTick()

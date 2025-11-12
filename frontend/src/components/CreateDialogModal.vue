@@ -30,10 +30,15 @@
       </div>
 
       <!-- Users List -->
-      <div class="max-h-96 overflow-y-auto">
+      <div ref="usersListContainer" class="max-h-96 overflow-y-auto" @scroll="handleUsersScroll">
         <!-- Loading -->
         <div v-if="isLoading" class="flex items-center justify-center p-8">
           <div class="text-gray-400">Загрузка...</div>
+        </div>
+
+        <!-- Loading More -->
+        <div v-if="isLoadingMore" class="flex items-center justify-center py-2">
+          <div class="text-sm text-gray-400">Загрузка пользователей...</div>
         </div>
 
         <!-- Users -->
@@ -97,6 +102,7 @@ interface User {
   userId: string
   name: string
   phone: string
+  avatar?: string | null
 }
 
 const props = defineProps<{
@@ -111,7 +117,11 @@ const emit = defineEmits<{
 const searchQuery = ref('')
 const users = ref<User[]>([])
 const isLoading = ref(false)
+const isLoadingMore = ref(false)
 const isCreating = ref(false)
+const currentPage = ref(1)
+const hasMore = ref(true)
+const usersListContainer = ref<HTMLElement | null>(null)
 
 // Debounce timer
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -119,29 +129,91 @@ let searchTimeout: ReturnType<typeof setTimeout>
 // Load users on open
 watch(() => props.isOpen, (newValue) => {
   if (newValue) {
+    resetUsers()
     loadUsers()
   } else {
     // Reset on close
     searchQuery.value = ''
-    users.value = []
+    resetUsers()
   }
 })
 
-async function loadUsers(search?: string) {
-  isLoading.value = true
+function resetUsers() {
+  users.value = []
+  currentPage.value = 1
+  hasMore.value = true
+  isLoadingMore.value = false
+}
+
+async function loadUsers(search?: string, append = false) {
+  const page = append ? currentPage.value + 1 : 1
+  const limit = 50
+
+  if (append) {
+    if (isLoadingMore.value || isLoading.value || !hasMore.value) {
+      return
+    }
+    isLoadingMore.value = true
+  } else {
+    isLoading.value = true
+    currentPage.value = 1
+    hasMore.value = true
+  }
+
   try {
-    const response = await api.getUsers({ search, limit: 50 })
-    users.value = response.data || []
+    const response = await api.getUsers({ search, limit, page })
+    const newUsers = response.data || []
+    const pagination = response.pagination
+
+    if (append) {
+      // Add new users to existing list
+      const existingIds = new Set(users.value.map(u => u.userId))
+      const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.userId))
+      users.value = [...users.value, ...uniqueNewUsers]
+      currentPage.value = page
+      hasMore.value = pagination ? page < pagination.pages : false
+    } else {
+      // Replace users
+      users.value = newUsers
+      currentPage.value = page
+      hasMore.value = pagination ? page < pagination.pages : newUsers.length === limit
+    }
   } catch (error: any) {
     console.error('Failed to load users:', error)
   } finally {
-    isLoading.value = false
+    if (append) {
+      isLoadingMore.value = false
+    } else {
+      isLoading.value = false
+    }
+  }
+}
+
+async function loadMoreUsers() {
+  if (!hasMore.value || isLoadingMore.value || isLoading.value) {
+    return
+  }
+  await loadUsers(searchQuery.value, true)
+}
+
+// Handle scroll for infinite loading
+const SCROLL_LOAD_THRESHOLD = 200 // Load more when 200px from bottom
+
+function handleUsersScroll(event: Event) {
+  const container = event.target as HTMLElement
+  if (!container) return
+
+  const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+
+  if (scrollBottom < SCROLL_LOAD_THRESHOLD && hasMore.value && !isLoadingMore.value && !isLoading.value) {
+    void loadMoreUsers()
   }
 }
 
 function debouncedSearch() {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
+    resetUsers()
     loadUsers(searchQuery.value)
   }, 300)
 }

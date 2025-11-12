@@ -190,6 +190,7 @@ class ApiService {
   async getUsers(params?: {
     search?: string
     limit?: number
+    page?: number
   }): Promise<ApiResponse> {
     const { data } = await this.api.get('/users', { params })
     return data

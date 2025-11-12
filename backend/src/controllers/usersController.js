@@ -3,7 +3,7 @@ import Chat3Client from '../services/Chat3Client.js';
 
 export async function listUsers(req, res) {
   try {
-    const { search, limit = 50 } = req.query;
+    const { search, limit = 50, page = 1 } = req.query;
     const currentUserId = req.user.userId;
 
     const query = {
@@ -17,9 +17,17 @@ export async function listUsers(req, res) {
       ];
     }
 
+    const limitNum = parseInt(limit, 10);
+    const pageNum = parseInt(page, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get total count for pagination
+    const total = await User.countDocuments(query);
+
     const users = await User.find(query)
       .select('userId name phone createdAt lastActiveAt')
-      .limit(parseInt(limit, 10))
+      .skip(skip)
+      .limit(limitNum)
       .sort({ lastActiveAt: -1, createdAt: -1 });
 
     const usersWithAvatars = await Promise.all(
@@ -50,10 +58,17 @@ export async function listUsers(req, res) {
       }),
     );
 
+    const totalPages = Math.ceil(total / limitNum);
+
     return res.json({
       success: true,
       data: usersWithAvatars,
-      total: usersWithAvatars.length,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: totalPages,
+      },
     });
   } catch (error) {
     console.error('Error fetching users:', error);
