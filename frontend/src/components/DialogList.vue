@@ -383,13 +383,14 @@ const { isSearching, searchError, searchResults, lastSearchTerm, isLoadingMore, 
 
 const searchTerm = ref(lastSearchTerm.value || '')
 const MIN_SEARCH_LENGTH = 2
-type FilterOptionValue = 'all' | 'p2p' | 'group:private' | 'group:public'
+type FilterOptionValue = 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
 
 const filterOptions: Array<{ label: string; value: FilterOptionValue; icon?: string }> = [
   { label: 'Все', value: 'all' },
   { label: 'Личные', value: 'p2p', icon: '👥' },
   { label: 'Приватные группы', value: 'group:private', icon: '🔒' },
-  { label: 'Публичные группы', value: 'group:public', icon: '🌐' }
+  { label: 'Публичные группы', value: 'group:public', icon: '🌐' },
+  { label: 'Мои избранные', value: 'favorites', icon: '⭐' }
 ]
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -426,6 +427,19 @@ const filteredSearchResults = computed(() => {
         personal: [],
         groups: [],
         publicGroups: base.publicGroups
+      }
+    case 'favorites':
+      // Filter favorites from all categories
+      const favoriteKey = `favoriteFor${authStore.user?.userId || ''}`
+      const isFavorite = (dialog: Dialog) => {
+        const meta = dialog.meta || {}
+        const favoriteValue = meta[favoriteKey]
+        return !!(favoriteValue?.value ?? favoriteValue)
+      }
+      return {
+        personal: base.personal.filter(isFavorite),
+        groups: base.groups.filter(isFavorite),
+        publicGroups: base.publicGroups.filter(isFavorite)
       }
     default:
       return base

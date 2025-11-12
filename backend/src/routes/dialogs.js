@@ -12,6 +12,7 @@ import {
   addDialogMember,
   removeDialogMember,
   sendTypingIndicator,
+  toggleDialogFavorite,
 } from '../controllers/dialogsController.js';
 
 const router = express.Router();
@@ -286,5 +287,27 @@ router.post('/:dialogId/members', addDialogMember);
  *         description: Member removed
  */
 router.delete('/:dialogId/members/:userId', removeDialogMember);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/favorite:
+ *   post:
+ *     tags: [Dialogs]
+ *     summary: Toggle dialog favorite status for current user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Favorite status toggled
+ *       '404':
+ *         description: Dialog not found
+ */
+router.post('/:dialogId/favorite', toggleDialogFavorite);
 
 export default router;

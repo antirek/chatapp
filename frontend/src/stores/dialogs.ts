@@ -29,7 +29,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     publicGroups?: DialogSearchResponse['publicGroups']['pagination']
   }>({})
   const searchSequence = ref(0)
-  const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public'>('all')
+  const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'>('all')
 
   const hasMoreDialogs = computed(() => {
     if (!pagination.value) {
@@ -46,7 +46,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     includeLastMessage?: boolean
     append?: boolean
     retries?: number
-    type?: 'all' | 'p2p' | 'group:private' | 'group:public'
+    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
   }
 
   async function fetchDialogs(params?: FetchDialogsParams) {
@@ -54,7 +54,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     const limit = params?.limit ?? pagination.value?.limit ?? 50
     const includeLastMessage = params?.includeLastMessage ?? true
     const append = params?.append ?? page > 1
-    let filterForRequest: 'all' | 'p2p' | 'group:private' | 'group:public' = currentFilter.value
+    let filterForRequest: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' = currentFilter.value
 
     if (params?.type !== undefined) {
       filterForRequest = params.type

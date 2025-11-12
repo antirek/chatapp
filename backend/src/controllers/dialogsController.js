@@ -5,6 +5,7 @@ import {
   getP2PUserProfile,
 } from '../utils/p2pPersonalization.js';
 import { resolveNameFromMeta } from '../utils/nameResolver.js';
+import { authenticate } from '../middleware/auth.js';
 
 const MIN_SEARCH_LENGTH = 2;
 
@@ -279,6 +280,9 @@ export async function getDialogs(req, res) {
       params.filter = '(meta.type,eq,group)&(meta.groupType,eq,public)';
     } else if (requestedType === 'group:private') {
       params.filter = '(meta.type,eq,group)&(meta.groupType,eq,private)';
+    } else if (requestedType === 'favorites') {
+      const favoriteKey = `favoriteFor${currentUserId}`;
+      params.filter = `(meta.${favoriteKey},eq,true)`;
     }
 
     const result = await Chat3Client.getUserDialogs(currentUserId, params);
@@ -303,25 +307,12 @@ export async function getDialogs(req, res) {
       }),
     );
 
-    let filteredDialogs = processedDialogs;
-
-    if (requestedType === 'p2p') {
-      filteredDialogs = processedDialogs.filter(
-        (dialog) => (dialog.chatType || dialog.meta?.type || dialog.type) === 'p2p',
-      );
-    } else if (requestedType === 'group:public') {
-      filteredDialogs = processedDialogs.filter(
-        (dialog) => isGroupDialog(dialog) && isPublicGroup(dialog),
-      );
-    } else if (requestedType === 'group:private') {
-      filteredDialogs = processedDialogs.filter(
-        (dialog) => isGroupDialog(dialog) && !isPublicGroup(dialog),
-      );
-    }
+    // All filtering is done by Chat3 API via filter parameter
+    // No additional client-side filtering needed
 
     return res.json({
       success: true,
-      data: filteredDialogs,
+      data: processedDialogs,
       pagination: result.pagination,
     });
   } catch (error) {
@@ -1021,4 +1012,67 @@ export async function sendTypingIndicator(req, res) {
     });
   }
 }
+
+export async function toggleDialogFavorite(req, res) {
+  try {
+    const { dialogId } = req.params;
+    const currentUserId = req.user.userId;
+    const metaKey = `favoriteFor${currentUserId}`;
+
+    // Check if dialog exists and user is a member
+    try {
+      const dialog = await Chat3Client.getDialog(dialogId);
+      if (!dialog || !dialog.data) {
+        return res.status(404).json({
+          success: false,
+          error: 'Dialog not found',
+        });
+      }
+    } catch (error) {
+      if (error.response?.status === 404) {
+        return res.status(404).json({
+          success: false,
+          error: 'Dialog not found',
+        });
+      }
+      throw error;
+    }
+
+    // Check if favorite already exists
+    let isFavorite = false;
+    try {
+      const existingMeta = await Chat3Client.getMeta('dialog', dialogId, metaKey);
+      isFavorite = !!existingMeta;
+    } catch (error) {
+      if (error.response?.status !== 404) {
+        throw error;
+      }
+    }
+
+    if (isFavorite) {
+      // Remove from favorites
+      await Chat3Client.deleteMeta('dialog', dialogId, metaKey);
+      return res.json({
+        success: true,
+        isFavorite: false,
+        message: 'Dialog removed from favorites',
+      });
+    } else {
+      // Add to favorites
+      await Chat3Client.setMeta('dialog', dialogId, metaKey, { value: true });
+      return res.json({
+        success: true,
+        isFavorite: true,
+        message: 'Dialog added to favorites',
+      });
+    }
+  } catch (error) {
+    console.error('Error toggling dialog favorite:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to toggle favorite',
+    });
+  }
+}
+
 

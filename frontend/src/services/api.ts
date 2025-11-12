@@ -69,7 +69,7 @@ class ApiService {
     page?: number
     limit?: number
     includeLastMessage?: boolean
-    type?: 'p2p' | 'group:private' | 'group:public' | 'all'
+    type?: 'p2p' | 'group:private' | 'group:public' | 'all' | 'favorites'
   }): Promise<PaginatedResponse<Dialog>> {
     const queryParams = { ...params }
     if (queryParams?.type === 'all') {
@@ -142,6 +142,11 @@ class ApiService {
 
   async getDialogMembers(dialogId: string): Promise<ApiResponse> {
     const { data } = await this.api.get(`/dialogs/${dialogId}/members`)
+    return data
+  }
+
+  async toggleDialogFavorite(dialogId: string): Promise<ApiResponse<{ isFavorite: boolean }>> {
+    const { data } = await this.api.post(`/dialogs/${dialogId}/favorite`)
     return data
   }
 
