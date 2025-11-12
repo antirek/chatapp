@@ -19,7 +19,11 @@ export const useMessagesStore = defineStore('messages', () => {
   const messages = ref<Message[]>([])
   const typingUsersByDialog = ref<Map<string, Map<string, TypingUserEntry>>>(new Map())
   const isLoading = ref(false)
+  const isLoadingMore = ref(false)
   const error = ref<string | null>(null)
+  const currentDialogId = ref<string | null>(null)
+  const currentPage = ref<number>(1)
+  const hasMore = ref<boolean>(true)
   const typingTimeouts = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
   const lastTypingSignalAt = new Map<string, number>()
   const TYPING_THROTTLE_MS = 800
@@ -43,25 +47,78 @@ export const useMessagesStore = defineStore('messages', () => {
   async function fetchMessages(dialogId: string, params?: {
     page?: number
     limit?: number
+    append?: boolean // If true, append messages instead of replacing
   }) {
-    isLoading.value = true
+    // Reset state if loading different dialog
+    if (currentDialogId.value !== dialogId) {
+      messages.value = []
+      currentPage.value = 1
+      hasMore.value = true
+      currentDialogId.value = dialogId
+    }
+
+    const isAppend = params?.append || false
+    const page = params?.page || (isAppend ? currentPage.value + 1 : 1)
+    const limit = params?.limit || 50
+
+    if (isAppend) {
+      isLoadingMore.value = true
+    } else {
+      isLoading.value = true
+    }
     error.value = null
 
     try {
       const response = await api.getMessages(dialogId, {
-        page: params?.page || 1,
-        limit: params?.limit || 50
+        page,
+        limit
       })
 
       const normalizedMessages = response.data.map((message) => ensureNormalizedMessage(message))
-      messages.value = normalizedMessages
+      
+      if (isAppend) {
+        // Add older messages to the beginning
+        const existingIds = new Set(messages.value.map(m => m.messageId || m._id))
+        const newMessages = normalizedMessages.filter(m => {
+          const id = m.messageId || m._id
+          return id && !existingIds.has(id)
+        })
+        messages.value = [...newMessages, ...messages.value]
+        currentPage.value = page
+        hasMore.value = normalizedMessages.length === limit && response.pagination?.total > messages.value.length
+      } else {
+        // Replace all messages (initial load)
+        messages.value = normalizedMessages
+        currentPage.value = page
+        hasMore.value = normalizedMessages.length === limit && (response.pagination?.total || 0) > normalizedMessages.length
+      }
+      
       response.data = normalizedMessages
       return response
     } catch (err: any) {
       error.value = err.response?.data?.error || err.message
       throw err
     } finally {
-      isLoading.value = false
+      if (isAppend) {
+        isLoadingMore.value = false
+      } else {
+        isLoading.value = false
+      }
+    }
+  }
+
+  async function loadMoreMessages(dialogId: string) {
+    if (!hasMore.value || isLoadingMore.value || isLoading.value) {
+      return
+    }
+
+    try {
+      await fetchMessages(dialogId, {
+        append: true,
+        limit: 50
+      })
+    } catch (err) {
+      console.error('Failed to load more messages:', err)
     }
   }
 
@@ -285,6 +342,10 @@ export const useMessagesStore = defineStore('messages', () => {
   function clearMessages() {
     messages.value = []
     typingUsersByDialog.value = new Map()
+    currentDialogId.value = null
+    currentPage.value = 1
+    hasMore.value = true
+    isLoadingMore.value = false
     typingTimeouts.forEach((timeoutMap) => {
       timeoutMap.forEach((timeout) => clearTimeout(timeout))
     })
@@ -341,8 +402,12 @@ export const useMessagesStore = defineStore('messages', () => {
     sortedMessages,
     typingUsersByDialog,
     isLoading,
+    isLoadingMore,
+    hasMore,
+    currentPage,
     error,
     fetchMessages,
+    loadMoreMessages,
     sendMessage,
     addMessage,
     updateMessage,

@@ -22,7 +22,12 @@
     </div>
 
     <!-- Messages -->
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50" @scroll="handleScroll">
+      <!-- Loading More (at top) -->
+      <div v-if="messagesStore.isLoadingMore" class="flex justify-center py-2">
+        <div class="text-sm text-gray-400">Загрузка старых сообщений...</div>
+      </div>
+      
       <!-- Loading -->
       <div v-if="messagesStore.isLoading" class="flex justify-center">
         <div class="text-gray-400">Загрузка сообщений...</div>
@@ -319,6 +324,22 @@ const typingUsersText = computed(() => {
   return formatted || 'печатают...'
 })
 
+// Load messages when dialog changes
+watch(() => props.dialog?.dialogId, async (dialogId) => {
+  if (dialogId) {
+    isInitialLoad = true
+    isUserNearBottom = true
+    previousScrollHeight = 0
+    await messagesStore.fetchMessages(dialogId)
+    await nextTick()
+    scrollToBottom()
+    // Initialize scroll height after first load
+    if (messagesContainer.value) {
+      previousScrollHeight = messagesContainer.value.scrollHeight
+    }
+  }
+}, { immediate: true })
+
 // Load other user info and current user avatar on mount
 onMounted(async () => {
   syncOtherUserFromMeta()
@@ -347,15 +368,60 @@ async function loadCurrentUserAvatar() {
   }
 }
 
-// Scroll to bottom when new messages arrive
+// Scroll management for infinite scroll
+let previousScrollHeight = 0
+let isUserNearBottom = true
+let isInitialLoad = true
+
 watch(() => messagesStore.messages.length, async () => {
   await nextTick()
-  scrollToBottom()
+  if (messagesContainer.value) {
+    const container = messagesContainer.value
+    const wasNearBottom = isUserNearBottom
+    const wasLoadingMore = messagesStore.isLoadingMore
+    
+    // Check if user was near bottom before new messages
+    const scrollThreshold = 100
+    isUserNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < scrollThreshold
+    
+    if (isInitialLoad || messagesStore.isLoading || (wasNearBottom && !wasLoadingMore)) {
+      // Auto-scroll to bottom on initial load or if user was near bottom (and not loading older messages)
+      scrollToBottom()
+      isInitialLoad = false
+    } else if (wasLoadingMore) {
+      // Preserve scroll position when loading older messages
+      const scrollDiff = container.scrollHeight - previousScrollHeight
+      if (scrollDiff > 0) {
+        container.scrollTop += scrollDiff
+      }
+    }
+    previousScrollHeight = container.scrollHeight
+  }
 })
 
 function scrollToBottom() {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+// Handle scroll for preemptive loading
+const SCROLL_LOAD_THRESHOLD = 300 // Load more when 300px from top
+
+function handleScroll(event: Event) {
+  const container = event.target as HTMLElement
+  if (!container || !props.dialog) return
+
+  const scrollTop = container.scrollTop
+  const isNearTop = scrollTop < SCROLL_LOAD_THRESHOLD
+
+  // Check if user is near bottom
+  const scrollBottom = container.scrollHeight - scrollTop - container.clientHeight
+  isUserNearBottom = scrollBottom < 100
+
+  // Load more messages if near top and has more
+  if (isNearTop && messagesStore.hasMore && !messagesStore.isLoadingMore && !messagesStore.isLoading) {
+    void messagesStore.loadMoreMessages(props.dialog.dialogId)
   }
 }
 
