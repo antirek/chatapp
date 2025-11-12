@@ -55,6 +55,24 @@ export interface LastMessage {
 }
 
 // Message types
+export interface QuotedMessage {
+  messageId: string
+  dialogId: string
+  senderId: string
+  content?: string
+  type: string
+  createdAt: string | number
+  updatedAt?: string | number
+  meta?: Record<string, any>
+  senderInfo?: {
+    userId: string
+    name?: string
+    phone?: string
+    avatar?: string | null
+    [key: string]: any
+  }
+}
+
 export interface Message {
   _id?: string
   messageId?: string
@@ -79,12 +97,14 @@ export interface Message {
     createdAt?: string | number
   }>
   normalizedType?: string
+  quotedMessage?: QuotedMessage
 }
 
 export interface SendMessageData {
   content?: string
   type?: string
   meta?: Record<string, any>
+  quotedMessageId?: string
 }
 
 // Chat3 Update types

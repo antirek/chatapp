@@ -45,7 +45,7 @@ export async function getDialogMessages(req, res) {
 export async function sendDialogMessage(req, res) {
   try {
     const { dialogId } = req.params;
-    const { content, type = 'text', meta = {} } = req.body;
+    const { content, type = 'text', meta = {}, quotedMessageId } = req.body;
     const mappedType = mapOutgoingMessageType(type);
     const trimmedContent = typeof content === 'string' ? content.trim() : '';
 
@@ -85,6 +85,10 @@ export async function sendDialogMessage(req, res) {
 
     if (effectiveContent) {
       messagePayload.content = effectiveContent;
+    }
+
+    if (quotedMessageId) {
+      messagePayload.quotedMessageId = quotedMessageId;
     }
 
     const result = await Chat3Client.createMessage(dialogId, messagePayload);

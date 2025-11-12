@@ -46,7 +46,7 @@
         <!-- Regular Message -->
         <div
           v-else
-          class="flex mb-3 gap-2"
+          class="flex mb-3 gap-2 group relative"
           :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
         >
           <!-- Avatar (for other user's messages - left side) -->
@@ -60,7 +60,7 @@
             />
           </div>
 
-          <div class="flex flex-col" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
+          <div class="flex flex-col relative" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
             <!-- Sender Name -->
             <div class="text-xs mb-1 px-1"
               :class="isOwnMessage(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
@@ -70,9 +70,35 @@
           
           <!-- Message Bubble -->
           <div
-            class="max-w-xs lg:max-w-md rounded-lg"
+            class="max-w-xs lg:max-w-md rounded-lg relative"
             :class="getMessageBubbleClasses(message)"
           >
+            <!-- Quoted Message (show only the quoted message, not nested quotes) -->
+            <div
+              v-if="message.quotedMessage"
+              class="mb-2 p-2 bg-gray-100 dark:bg-gray-700 rounded border-l-4 border-primary-500"
+              :class="isOwnMessage(message) ? 'border-primary-400' : 'border-primary-600'"
+            >
+              <div class="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                {{ getQuotedMessageSenderName(message.quotedMessage) }}
+              </div>
+              <div class="text-sm text-gray-700 dark:text-gray-200 line-clamp-2">
+                <template v-if="isQuotedMessageImage(message.quotedMessage)">
+                  <div class="flex items-center gap-2">
+                    <img
+                      :src="getQuotedMessageImageUrl(message.quotedMessage)"
+                      alt="Quoted image"
+                      class="w-12 h-12 object-cover rounded"
+                    />
+                    <span class="text-xs text-gray-500">Изображение</span>
+                  </div>
+                </template>
+                <template v-else>
+                  {{ message.quotedMessage.content || 'Сообщение' }}
+                </template>
+              </div>
+            </div>
+
             <!-- Message Content -->
             <template v-if="isImageMessage(message)">
               <a
@@ -136,6 +162,17 @@
             >
               ✓ Отметить прочтенным
             </button>
+
+            <!-- Reply Button -->
+            <button
+              v-if="!isSystemNotification(message)"
+              @click.stop="handleQuoteMessage(message)"
+              class="absolute opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-white shadow-md border border-gray-200 hover:bg-gray-50 z-10 whitespace-nowrap text-gray-700 hover:text-gray-900"
+              :class="isOwnMessage(message) ? 'top-1 right-1' : 'top-1 left-1'"
+              title="Ответить"
+            >
+              Ответить
+            </button>
           </div>
         </div>
 
@@ -163,7 +200,12 @@
     </div>
 
     <!-- Message Input -->
-    <MessageInput @send="handleSendMessage" @send-image="handleSendImage" />
+    <MessageInput
+      :quoted-message="quotedMessage"
+      @send="handleSendMessage"
+      @send-image="handleSendImage"
+      @cancel-quote="handleCancelQuote"
+    />
 
     <!-- User Info Modal (for P2P chats) -->
     <UserInfoModal
@@ -237,6 +279,7 @@ const isAddMembersOpen = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
 const existingMemberIds = ref<string[]>([])
+const quotedMessage = ref<Message | null>(null)
 const currentUserId = computed(() => authStore.user?.userId || '')
 const isP2PDialog = computed(() => {
   const chatType = props.dialog.chatType || props.dialog.meta?.type
@@ -573,10 +616,20 @@ async function handleSendMessage(content: string) {
   if (!props.dialog) return
 
   try {
-    await messagesStore.sendMessage(props.dialog.dialogId, {
+    const messageData: SendMessageData = {
       content,
       type: 'text'
-    })
+    }
+
+    if (quotedMessage.value) {
+      const messageId = quotedMessage.value.messageId || quotedMessage.value._id
+      if (messageId) {
+        messageData.quotedMessageId = messageId
+      }
+    }
+
+    await messagesStore.sendMessage(props.dialog.dialogId, messageData)
+    quotedMessage.value = null
   } catch (error) {
     console.error('Failed to send message:', error)
   }
@@ -604,10 +657,59 @@ async function handleSendImage(payload: ImageMessagePayload) {
       messagePayload.content = caption
     }
 
+    if (quotedMessage.value) {
+      const messageId = quotedMessage.value.messageId || quotedMessage.value._id
+      if (messageId) {
+        messagePayload.quotedMessageId = messageId
+      }
+    }
+
     await messagesStore.sendMessage(props.dialog.dialogId, messagePayload)
+    quotedMessage.value = null
   } catch (error) {
     console.error('Failed to send image message:', error)
   }
+}
+
+// Quote message functions
+function handleQuoteMessage(message: Message) {
+  // Create a clean message object without nested quotes for preview
+  const cleanMessage: Message = {
+    ...message,
+    quotedMessage: undefined // Remove nested quotes to prevent multi-level nesting
+  }
+  quotedMessage.value = cleanMessage
+  // Scroll to input (will be handled by MessageInput focus)
+}
+
+function handleCancelQuote() {
+  quotedMessage.value = null
+}
+
+function getQuotedMessageSenderName(quotedMessage: any): string {
+  if (quotedMessage.senderInfo?.name) {
+    return quotedMessage.senderInfo.name
+  }
+  if (quotedMessage.sender?.name) {
+    return quotedMessage.sender.name
+  }
+  // Try to get from current messages
+  const originalMessage = messagesStore.messages.find(
+    (m) => (m.messageId || m._id) === quotedMessage.messageId
+  )
+  if (originalMessage) {
+    return getSenderName(originalMessage)
+  }
+  return quotedMessage.senderId || 'Пользователь'
+}
+
+function isQuotedMessageImage(quotedMessage: any): boolean {
+  const type = quotedMessage.type || ''
+  return type.includes('image') || quotedMessage.meta?.url
+}
+
+function getQuotedMessageImageUrl(quotedMessage: any): string {
+  return quotedMessage.meta?.url || ''
 }
 
 // User Info Modal functions

@@ -75,14 +75,14 @@
 | Категория | Endpoint | Описание | Требуемые права |
 |-----------|----------|----------|-----------------|
 | Tenants | `GET/POST/PUT/DELETE /tenants` | Управление организациями (редко используется внешними системами). | read/write/delete |
-| Dialogs | `GET /dialogs` | Список диалогов с фильтрами, сортировкой, пагинацией; участники не включаются. | read |
+| Dialogs | `GET /dialogs` | Список диалогов с фильтрами, сортировкой, пагинацией; участники не включаются, поле `memberCount` показывает количество участников. | read |
 | Dialogs | `POST /dialogs` | Создание диалога, указание участников и мета-тегов. | write |
-| Dialogs | `GET /dialogs/:dialogId` | Детали диалога и мета-информация без списка участников. | read |
+| Dialogs | `GET /dialogs/:dialogId` | Детали диалога и мета-информация без списка участников; доступно поле `memberCount`. | read |
 | Dialogs | `GET /dialogs/:dialogId/members` | Пагинированный список участников диалога с фильтрами `queryParser` и `meta.*`. | read |
 | Dialogs | `DELETE /dialogs/:dialogId` | Удаление диалога. | delete |
 | Dialog Members | `POST /dialogs/{dialogId}/member/{userId}/typing` | Сигнал "пользователь печатает" (идемпотентен 1 с). | write |
 | Messages | `GET /dialogs/:dialogId/messages` | Сообщения в диалоге с фильтрами. | read |
-| Messages | `POST /dialogs/:dialogId/messages` | Отправка сообщения (`content`, `type`, `meta`). | write |
+| Messages | `POST /dialogs/:dialogId/messages` | Отправка сообщения (`content`, `type`, `meta`, `quotedMessageId`). | write |
 | Messages | `GET /messages` | Глобальный поиск сообщений (все диалоги). | read |
 | Message Status | `POST /messages/:messageId/status/:userId/:status` | Установка статусов (`unread`, `delivered`, `read`). | write |
 | Message Reactions | `GET /messages/:messageId/reactions` | Получение реакций. | read |
@@ -95,6 +95,8 @@
 | Meta | `GET/PUT/DELETE /meta/:entityType/:entityId/:key` | Работа с мета-тегами любой сущности. | read/write/delete |
 
 > Полные описания полей и примеры см. в `docs/API.md` (REST) и `docs/FILTER_RULES.md` (фильтры).
+
+- Ответы `GET /messages` и `GET /dialogs/:dialogId/messages` содержат объект `senderInfo`, если пользователь с `senderId` существует. В структуру входят `userId`, `name`, временные метки и `meta` (все мета-теги пользователя).
 
 #### Получение участников диалога
 
@@ -134,7 +136,7 @@
 
 | Тип | Обязательные поля | Дополнительно |
 |-----|-------------------|---------------|
-| `internal.text` | `senderId`, `content` (1–10 000 символов) | `meta` опционален |
+| `internal.text` | `senderId`, `content` (1–10 000 символов) | `meta` опционален, `quotedMessageId` опционален |
 | `internal.image` | `senderId`, `meta.url` | `content` — подпись к изображению (опционально), `meta` может содержать `mimeType`, `size`, `width`, `height` и т.д. |
 | `internal.file` | `senderId`, `meta.url` | `content` — подпись, `meta` может хранить `mimeType`, `size`, `fileName` |
 | `internal.video` | `senderId`, `meta.url` | Дополнительно `meta.previewUrl`, `duration` и т.д. |
@@ -181,6 +183,50 @@
 - Поле `meta` допускает строки, числа, булевы, массивы и объекты.
 - В теле сообщения не отправляются бинарные данные — используйте ссылки в `meta` (например, `attachmentUrl`).
 
+### Цитирование сообщений
+
+При создании сообщения можно указать `quotedMessageId` для цитирования другого сообщения. Цитируемое сообщение будет автоматически найдено, обогащено мета-тегами и информацией об отправителе (`senderInfo`), и добавлено в создаваемое сообщение как объект `quotedMessage`.
+
+**Параметры:**
+- `quotedMessageId` (опционально) — строка в формате `msg_` + 20 символов (например, `msg_7c4xtkt4bhcmfn49rjvr`). Должно соответствовать существующему сообщению в том же tenant.
+
+**Что происходит:**
+1. После сохранения нового сообщения в БД система ищет цитируемое сообщение по `quotedMessageId`.
+2. Загружаются мета-теги цитируемого сообщения и информация об его отправителе (`senderInfo`).
+3. Формируется объект `quotedMessage` со следующей структурой:
+   ```json
+   {
+     "messageId": "msg_7c4xtkt4bhcmfn49rjvr",
+     "dialogId": "dlg_abc123def456ghi789j",
+     "senderId": "carl",
+     "content": "Исходное сообщение",
+     "type": "internal.text",
+     "createdAt": 1699447823512,
+     "updatedAt": 1699447823512,
+     "meta": {
+       "channelType": "whatsapp"
+     },
+     "senderInfo": {
+       "userId": "carl",
+       "name": "Carl Smith",
+       "lastActiveAt": 1699447800000,
+       "createdAt": 1699000000000,
+       "updatedAt": 1699447800000,
+       "meta": {
+         "role": "manager"
+       }
+     }
+   }
+   ```
+4. `quotedMessage` сохраняется в документе нового сообщения в БД.
+5. `quotedMessage` включается в событие `message.create` (в поле `data.quotedMessage`).
+6. `quotedMessage` автоматически попадает в Updates через `buildFullMessagePayload`.
+
+**Важно:**
+- Если цитируемое сообщение не найдено, создание нового сообщения не прерывается, но `quotedMessage` будет `null`.
+- Цитируемое сообщение должно принадлежать тому же `tenantId`, что и новое сообщение.
+- `quotedMessage` содержит полную информацию, включая мета-теги и `senderInfo`, что позволяет отображать цитату без дополнительных запросов.
+
 ### Пример создания сообщения
 
 ```bash
@@ -198,6 +244,25 @@ curl -X POST http://localhost:3000/api/dialogs/64fa1cca6f/messages \
     }
   }'
 ```
+
+**Пример с цитированием сообщения:**
+
+```bash
+curl -X POST http://localhost:3000/api/dialogs/64fa1cca6f/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: <YOUR_API_KEY>" \
+  -d '{
+    "senderId": "agent_42",
+    "type": "internal.text",
+    "content": "Отвечаю на ваше сообщение",
+    "quotedMessageId": "msg_7c4xtkt4bhcmfn49rjvr",
+    "meta": {
+      "channelType": "whatsapp"
+    }
+  }'
+```
+
+В ответе и в событиях/updates будет включено поле `quotedMessage` с полной информацией о цитируемом сообщении.
 
 Ответ содержит созданный документ `Message` и связанные `Event`/`Update` будут опубликованы асинхронно.
 
@@ -250,7 +315,7 @@ curl -X POST http://localhost:3000/api/dialogs/64fa1cca6f/messages \
 | Dialog | `dialog.create`, `dialog.update`, `dialog.delete` | Имя, участники, мета-теги. |
 | Dialog Members | `dialog.member.add`, `dialog.member.remove`, `dialog.member.update` | Участник, роль, мета участника. |
 | Message | `message.create`, `message.update`, `message.delete` | Контент, тип, мета, reactions. |
-| Message Status | `message.status.create`, `message.status.update` | Изменение статусов `unread/delivered/read`. |
+| Message Status | `message.status.create`, `message.status.update` | Изменение статусов `unread/delivered/read`; `MessageUpdate` содержит полное сообщение с `meta`, `statuses`, `senderInfo`. |
 | Message Reaction | `message.reaction.add`, `message.reaction.update`, `message.reaction.remove` | Счётчики реакций. |
 | Dialog Typing | `dialog.typing` | Сигнал о том, что конкретный пользователь печатает (экспирация на клиенте). |
 

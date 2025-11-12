@@ -278,7 +278,7 @@ export async function getDialogs(req, res) {
     } else if (requestedType === 'group:public') {
       params.filter = '(meta.type,eq,group)&(meta.groupType,eq,public)';
     } else if (requestedType === 'group:private') {
-      params.filter = '(meta.type,eq,group)';
+      params.filter = '(meta.type,eq,group)&(meta.groupType,eq,private)';
     }
 
     const result = await Chat3Client.getUserDialogs(currentUserId, params);

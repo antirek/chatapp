@@ -1,5 +1,41 @@
 <template>
   <div class="p-4 bg-white border-t border-gray-200">
+    <!-- Quoted Message Preview -->
+    <div
+      v-if="quotedMessage"
+      class="mb-2 p-2 bg-gray-100 rounded border-l-4 border-primary-500 flex items-start justify-between gap-2"
+    >
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium text-gray-600 mb-1">
+          {{ getQuotedMessageSenderName(quotedMessage) }}
+        </div>
+        <div class="text-sm text-gray-700 line-clamp-2">
+          <template v-if="isQuotedMessageImage(quotedMessage)">
+            <div class="flex items-center gap-2">
+              <img
+                :src="getQuotedMessageImageUrl(quotedMessage)"
+                alt="Quoted image"
+                class="w-12 h-12 object-cover rounded"
+              />
+              <span class="text-xs text-gray-500">Изображение</span>
+            </div>
+          </template>
+          <template v-else>
+            {{ quotedMessage.content || 'Сообщение' }}
+          </template>
+        </div>
+      </div>
+      <button
+        @click="handleCancelQuote"
+        class="flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+        title="Отменить цитирование"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
     <form @submit.prevent="sendMessage" class="flex flex-col gap-2">
       <input
         ref="fileInput"
@@ -68,10 +104,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useMessagesStore } from '@/stores/messages'
 import { uploadImageToFilebump } from '@/services/filebump'
+import type { Message } from '@/types'
 
 interface ImageMessagePayload {
   url: string
@@ -83,9 +120,14 @@ interface ImageMessagePayload {
   height?: number
 }
 
+const props = defineProps<{
+  quotedMessage?: Message | null
+}>()
+
 const emit = defineEmits<{
   send: [content: string]
   'send-image': [payload: ImageMessagePayload]
+  'cancel-quote': []
 }>()
 
 const dialogsStore = useDialogsStore()
@@ -109,6 +151,35 @@ function sendMessage() {
   if (isTyping.value) {
     stopTyping()
   }
+}
+
+function handleCancelQuote() {
+  emit('cancel-quote')
+}
+
+function getQuotedMessageSenderName(quotedMessage: Message): string {
+  // First try sender from message
+  if (quotedMessage.sender?.name) {
+    return quotedMessage.sender.name
+  }
+  // Then try to get from messagesStore (if message is in current dialog)
+  const messagesStore = useMessagesStore()
+  const originalMessage = messagesStore.messages.find(
+    (m) => (m.messageId || m._id) === (quotedMessage.messageId || quotedMessage._id)
+  )
+  if (originalMessage?.sender?.name) {
+    return originalMessage.sender.name
+  }
+  return quotedMessage.senderId || 'Пользователь'
+}
+
+function isQuotedMessageImage(quotedMessage: Message): boolean {
+  const type = quotedMessage.type || ''
+  return type.includes('image') || !!quotedMessage.meta?.url
+}
+
+function getQuotedMessageImageUrl(quotedMessage: Message): string {
+  return quotedMessage.meta?.url || ''
 }
 
 function handleFocus() {
