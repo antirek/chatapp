@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { normalizeMessageType } from '@/utils/messageType'
-import type { Dialog, DialogSearchResponse, PaginatedResponse } from '@/types'
+import type { Dialog, PaginatedResponse } from '@/types'
 
 export const useDialogsStore = defineStore('dialogs', () => {
   const dialogs = ref<Dialog[]>([])
@@ -12,22 +12,11 @@ export const useDialogsStore = defineStore('dialogs', () => {
   const error = ref<string | null>(null)
   const pagination = ref<PaginatedResponse<Dialog>['pagination'] | null>(null)
   const isSearching = ref(false)
+  const isLoadingMoreSearch = ref(false)
   const searchError = ref<string | null>(null)
   const lastSearchTerm = ref('')
-  const searchResults = ref<{
-    personal: Dialog[]
-    groups: Dialog[]
-    publicGroups: Dialog[]
-  }>({
-    personal: [],
-    groups: [],
-    publicGroups: []
-  })
-  const searchPagination = ref<{
-    personal?: DialogSearchResponse['personal']['pagination']
-    groups?: DialogSearchResponse['groups']['pagination']
-    publicGroups?: DialogSearchResponse['publicGroups']['pagination']
-  }>({})
+  const searchResults = ref<Dialog[]>([])
+  const searchPagination = ref<PaginatedResponse<Dialog>['pagination'] | null>(null)
   const searchSequence = ref(0)
   const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'>('all')
 
@@ -37,6 +26,15 @@ export const useDialogsStore = defineStore('dialogs', () => {
     }
     const currentPage = Number(pagination.value.page) || 0
     const totalPages = Number(pagination.value.pages) || 0
+    return currentPage < totalPages
+  })
+
+  const hasMoreSearchResults = computed(() => {
+    if (!searchPagination.value) {
+      return false
+    }
+    const currentPage = Number(searchPagination.value.page) || 0
+    const totalPages = Number(searchPagination.value.pages) || 0
     return currentPage < totalPages
   })
 
@@ -306,49 +304,48 @@ export const useDialogsStore = defineStore('dialogs', () => {
   }
 
   async function searchDialogs(search: string, options?: {
-    p2pPage?: number
-    p2pLimit?: number
-    groupPage?: number
-    groupLimit?: number
-    publicPage?: number
-    publicLimit?: number
+    page?: number
+    limit?: number
+    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
+    append?: boolean
   }) {
     const trimmed = search?.trim() || ''
 
     if (trimmed.length < 2) {
       clearSearch()
-      return {
-        search: trimmed,
-        personal: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } },
-        groups: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } },
-        publicGroups: { data: [], pagination: { page: 1, limit: 0, total: 0, pages: 0 } }
-      }
+      return
     }
 
-    isSearching.value = true
+    const append = options?.append ?? false
+    const page = options?.page || (append && searchPagination.value ? Number(searchPagination.value.page) + 1 : 1)
+
+    if (append) {
+      isLoadingMoreSearch.value = true
+    } else {
+      isSearching.value = true
+    }
     searchError.value = null
     const sequenceId = ++searchSequence.value
 
     try {
-      const response = await api.searchDialogs({
+      const response = await api.getDialogs({
         search: trimmed,
-        ...options
+        page,
+        limit: options?.limit || 50,
+        includeLastMessage: true,
+        type: options?.type || currentFilter.value === 'all' ? undefined : currentFilter.value
       })
 
       if (sequenceId === searchSequence.value) {
-        searchResults.value = {
-          personal: response.personal?.data || [],
-          groups: response.groups?.data || [],
-          publicGroups: response.publicGroups?.data || []
+        if (append) {
+          // Append new results to existing ones
+          searchResults.value = [...searchResults.value, ...(response.data || [])]
+        } else {
+          // Replace results
+          searchResults.value = response.data || []
         }
-
-        searchPagination.value = {
-          personal: response.personal?.pagination,
-          groups: response.groups?.pagination,
-          publicGroups: response.publicGroups?.pagination
-        }
-
-        lastSearchTerm.value = response.search || trimmed
+        searchPagination.value = response.pagination || null
+        lastSearchTerm.value = trimmed
       }
 
       return response
@@ -357,19 +354,30 @@ export const useDialogsStore = defineStore('dialogs', () => {
       throw err
     } finally {
       if (sequenceId === searchSequence.value) {
-        isSearching.value = false
+        if (append) {
+          isLoadingMoreSearch.value = false
+        } else {
+          isSearching.value = false
+        }
       }
     }
   }
 
+  async function loadMoreSearchResults() {
+    if (isSearching.value || isLoadingMoreSearch.value || !hasMoreSearchResults.value || !lastSearchTerm.value) {
+      return
+    }
+
+    await searchDialogs(lastSearchTerm.value, {
+      append: true,
+      type: currentFilter.value === 'all' ? undefined : currentFilter.value
+    })
+  }
+
   function clearSearch() {
     searchSequence.value++
-    searchResults.value = {
-      personal: [],
-      groups: [],
-      publicGroups: []
-    }
-    searchPagination.value = {}
+    searchResults.value = []
+    searchPagination.value = null
     lastSearchTerm.value = ''
     searchError.value = null
     isSearching.value = false
@@ -392,11 +400,14 @@ export const useDialogsStore = defineStore('dialogs', () => {
     updateLastMessage,
     currentFilter,
     isSearching,
+    isLoadingMoreSearch,
     searchError,
     searchResults,
     searchPagination,
     lastSearchTerm,
+    hasMoreSearchResults,
     searchDialogs,
+    loadMoreSearchResults,
     clearSearch
   }
 })

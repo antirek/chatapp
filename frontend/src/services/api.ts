@@ -6,8 +6,7 @@ import type {
   Message,
   SendMessageData,
   PaginatedResponse,
-  ApiResponse,
-  DialogSearchResponse
+  ApiResponse
 } from '@/types'
 
 class ApiService {
@@ -70,25 +69,13 @@ class ApiService {
     limit?: number
     includeLastMessage?: boolean
     type?: 'p2p' | 'group:private' | 'group:public' | 'all' | 'favorites'
+    search?: string
   }): Promise<PaginatedResponse<Dialog>> {
     const queryParams = { ...params }
     if (queryParams?.type === 'all') {
       delete (queryParams as any).type
     }
     const { data } = await this.api.get('/dialogs', { params: queryParams })
-    return data
-  }
-
-  async searchDialogs(params: {
-    search: string
-    p2pPage?: number
-    p2pLimit?: number
-    groupPage?: number
-    groupLimit?: number
-    publicPage?: number
-    publicLimit?: number
-  }): Promise<DialogSearchResponse> {
-    const { data } = await this.api.get('/dialogs/search', { params })
     return data
   }
 

@@ -5,7 +5,7 @@ import {
   getP2PUserProfile,
 } from '../utils/p2pPersonalization.js';
 import { resolveNameFromMeta } from '../utils/nameResolver.js';
-import { authenticate } from '../middleware/auth.js';
+// import { authenticate } from '../middleware/auth.js';
 
 const MIN_SEARCH_LENGTH = 2;
 
@@ -96,27 +96,6 @@ export async function resolveUserName(userId, fallbackName) {
   }
 }
 
-async function safeGetUserDialogs(userId, params) {
-  try {
-    return await Chat3Client.getUserDialogs(userId, params);
-  } catch (error) {
-    if (error.response?.status === 404) {
-      return createEmptyResult(parseInt(params.page, 10) || 1, parseInt(params.limit, 10) || 0);
-    }
-    throw error;
-  }
-}
-
-async function safeGetDialogs(params) {
-  try {
-    return await Chat3Client.getDialogs(params);
-  } catch (error) {
-    if (error.response?.status === 404) {
-      return createEmptyResult(parseInt(params.page, 10) || 1, parseInt(params.limit, 10) || 0);
-    }
-    throw error;
-  }
-}
 
 async function ensureP2PMeta(dialog, currentUserId) {
   const nameKey = `p2pDialogNameFor${currentUserId}`;
@@ -243,20 +222,6 @@ async function processP2PDialog(dialog, currentUser) {
   };
 }
 
-function isPublicGroup(dialog) {
-  const groupType =
-    extractMetaValue(dialog.meta, 'groupType') ||
-    extractMetaValue(dialog.meta, 'visibility') ||
-    dialog.meta?.groupType ||
-    dialog.meta?.visibility;
-  return (groupType || '').toLowerCase() === 'public';
-}
-
-function isGroupDialog(dialog) {
-  const dialogType = dialog.chatType || dialog.meta?.type || dialog.type;
-  return dialogType === 'group';
-}
-
 export async function getDialogs(req, res) {
   try {
     const {
@@ -264,9 +229,19 @@ export async function getDialogs(req, res) {
       limit = 10,
       includeLastMessage = false,
       type: rawType,
+      search: rawSearch,
     } = req.query;
     const currentUserId = req.user.userId;
     const requestedType = typeof rawType === 'string' ? rawType : null;
+    const trimmedSearch = (rawSearch || '').trim();
+
+    // Validate search term if provided
+    if (trimmedSearch && trimmedSearch.length < MIN_SEARCH_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        error: `Search term must be at least ${MIN_SEARCH_LENGTH} characters`,
+      });
+    }
 
     const params = {
       page,
@@ -274,15 +249,47 @@ export async function getDialogs(req, res) {
       includeLastMessage,
     };
 
+    // Build filter conditions
+    const filterParts = [];
+
+    // Type filter
     if (requestedType === 'p2p') {
-      params.filter = '(meta.type,eq,p2p)';
+      filterParts.push('(meta.type,eq,p2p)');
     } else if (requestedType === 'group:public') {
-      params.filter = '(meta.type,eq,group)&(meta.groupType,eq,public)';
+      filterParts.push('(meta.type,eq,group)&(meta.groupType,eq,public)');
     } else if (requestedType === 'group:private') {
-      params.filter = '(meta.type,eq,group)&(meta.groupType,eq,private)';
+      filterParts.push('(meta.type,eq,group)&(meta.groupType,eq,private)');
     } else if (requestedType === 'favorites') {
       const favoriteKey = `favoriteFor${currentUserId}`;
-      params.filter = `(meta.${favoriteKey},eq,true)`;
+      filterParts.push(`(meta.${favoriteKey},eq,true)`);
+    }
+
+    // Search filter
+    if (trimmedSearch && trimmedSearch.length >= MIN_SEARCH_LENGTH) {
+      const escaped = escapeRegex(trimmedSearch);
+      const pattern = `.*${escaped}.*`;
+      const nameMetaKey = `p2pDialogNameFor${currentUserId}`;
+
+      if (requestedType === 'p2p') {
+        // Search only in P2P dialogs by personalized name
+        filterParts.push(`(meta.${nameMetaKey},regex,"${pattern}")`);
+      } else if (requestedType === 'group:public' || requestedType === 'group:private') {
+        // Search only in groups by name
+        filterParts.push(`(name,regex,"${pattern}")`);
+      } else {
+        // Search in both P2P and groups (universal search)
+        // For P2P: search by personalized name meta
+        // For groups: search by name
+        // Since Chat3 API may not support OR, we'll search by name which works for groups
+        // and also check P2P personalized names via meta
+        // Using name filter which will match groups, and we'll filter P2P client-side if needed
+        filterParts.push(`(name,regex,"${pattern}")`);
+      }
+    }
+
+    // Combine all filter parts
+    if (filterParts.length > 0) {
+      params.filter = filterParts.join('&');
     }
 
     const result = await Chat3Client.getUserDialogs(currentUserId, params);
@@ -307,144 +314,27 @@ export async function getDialogs(req, res) {
       }),
     );
 
-    // All filtering is done by Chat3 API via filter parameter
-    // No additional client-side filtering needed
+    // Additional client-side filtering for search
+    // This ensures that search results are properly filtered even when Chat3 API regex filter
+    // doesn't work correctly or when we need to filter by processed dialog names (e.g., P2P personalized names)
+    let filteredDialogs = processedDialogs;
+    if (trimmedSearch && trimmedSearch.length >= MIN_SEARCH_LENGTH) {
+      const searchLower = trimmedSearch.toLowerCase();
+      filteredDialogs = processedDialogs.filter((dialog) => {
+        const dialogName = (dialog?.name || dialog?.dialogName || '').toString();
+        return dialogName.toLowerCase().includes(searchLower);
+      });
+    }
 
     return res.json({
       success: true,
-      data: processedDialogs,
+      data: filteredDialogs,
       pagination: result.pagination,
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
       error: error.message,
-    });
-  }
-}
-
-export async function searchDialogs(req, res) {
-  const {
-    search,
-    p2pPage = 1,
-    p2pLimit = 10,
-    groupPage = 1,
-    groupLimit = 10,
-    publicPage = 1,
-    publicLimit = 10,
-  } = req.query;
-
-  const trimmedSearch = (search || '').trim();
-
-  if (!trimmedSearch || trimmedSearch.length < MIN_SEARCH_LENGTH) {
-    return res.status(400).json({
-      success: false,
-      error: `Search term must be at least ${MIN_SEARCH_LENGTH} characters`,
-    });
-  }
-
-  const currentUserId = req.user.userId;
-  const escaped = escapeRegex(trimmedSearch);
-  const nameMetaKey = `p2pDialogNameFor${currentUserId}`;
-  const pattern = `.*${escaped}.*`;
-  const searchLower = trimmedSearch.toLowerCase();
-
-  const matchesName = (dialog) => {
-    const dialogName = (dialog?.name || dialog?.dialogName || '').toString();
-    return dialogName.toLowerCase().includes(searchLower);
-  };
-
-  const p2pFilter = `(meta.type,eq,p2p)&(meta.${nameMetaKey},regex,"${pattern}")`;
-  const groupsFilter = `(meta.type,eq,group)&(name,regex,"${pattern}")`;
-  const publicFilter = `(meta.type,eq,group)&(meta.groupType,eq,public)&(member,ne,${currentUserId})&(name,regex,"${pattern}")`;
-
-  try {
-    const [p2pResult, groupResult, publicResult] = await Promise.all([
-      safeGetUserDialogs(currentUserId, {
-        page: parseInt(p2pPage, 10) || 1,
-        limit: parseInt(p2pLimit, 10) || 10,
-        filter: p2pFilter,
-        includeLastMessage: true,
-      }),
-      safeGetUserDialogs(currentUserId, {
-        page: parseInt(groupPage, 10) || 1,
-        limit: parseInt(groupLimit, 10) || 10,
-        filter: groupsFilter,
-        includeLastMessage: true,
-      }),
-      safeGetDialogs({
-        page: parseInt(publicPage, 10) || 1,
-        limit: parseInt(publicLimit, 10) || 10,
-        filter: publicFilter,
-        includeLastMessage: true,
-      }),
-    ]);
-
-    const processedPersonal = await Promise.all(
-      (p2pResult.data || []).map(async (dialog) => {
-        const processed = await processP2PDialog(dialog, req.user);
-        return {
-          ...processed,
-          chatType: 'p2p',
-        };
-      }),
-    );
-
-    const processedGroups = (groupResult.data || [])
-      .map((dialog) => ({
-        ...dialog,
-        chatType: 'group',
-      }))
-      .filter(matchesName);
-
-    const processedPublic = (publicResult.data || [])
-      .map((dialog) => ({
-        ...dialog,
-        chatType: 'group',
-        meta: {
-          ...(dialog.meta || {}),
-          groupType: dialog.meta?.groupType || 'public',
-        },
-        isPublic: true,
-      }))
-      .filter(matchesName);
-
-    return res.json({
-      success: true,
-      search: trimmedSearch,
-      personal: {
-        data: processedPersonal,
-        pagination: p2pResult.pagination || {
-          page: parseInt(p2pPage, 10) || 1,
-          limit: parseInt(p2pLimit, 10) || 10,
-          total: processedPersonal.length,
-          pages: processedPersonal.length ? 1 : 0,
-        },
-      },
-      groups: {
-        data: processedGroups,
-        pagination: groupResult.pagination || {
-          page: parseInt(groupPage, 10) || 1,
-          limit: parseInt(groupLimit, 10) || 10,
-          total: processedGroups.length,
-          pages: processedGroups.length ? 1 : 0,
-        },
-      },
-      publicGroups: {
-        data: processedPublic,
-        pagination: publicResult.pagination || {
-          page: parseInt(publicPage, 10) || 1,
-          limit: parseInt(publicLimit, 10) || 10,
-          total: processedPublic.length,
-          pages: processedPublic.length ? 1 : 0,
-        },
-      },
-    });
-  } catch (error) {
-    console.error('Dialog search failed:', error.message, error.response?.data || '');
-    return res.status(500).json({
-      success: false,
-      error: error.response?.data?.error || error.message || 'Failed to search dialogs',
     });
   }
 }

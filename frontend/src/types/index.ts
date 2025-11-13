@@ -164,20 +164,4 @@ export interface PaginatedResponse<T> {
   }
 }
 
-export interface DialogSearchResponse {
-  success: boolean
-  search: string
-  personal: {
-    data: Dialog[]
-    pagination: PaginatedResponse<Dialog>['pagination']
-  }
-  groups: {
-    data: Dialog[]
-    pagination: PaginatedResponse<Dialog>['pagination']
-  }
-  publicGroups: {
-    data: Dialog[]
-    pagination: PaginatedResponse<Dialog>['pagination']
-  }
-}
 

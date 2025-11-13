@@ -2,7 +2,6 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import {
   getDialogs,
-  searchDialogs,
   createDialog,
   getPublicDialogs,
   joinPublicDialog,
@@ -55,28 +54,6 @@ router.use(authenticate);
  *         description: Unauthorized
  */
 router.get('/', getDialogs);
-
-/**
- * @openapi
- * /api/dialogs/search:
- *   get:
- *     tags: [Dialog Members]
- *     summary: Search dialogs by name
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: search
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       '200':
- *         description: Search results
- *       '400':
- *         description: Validation error
- */
-router.get('/search', searchDialogs);
 
 /**
  * @openapi
