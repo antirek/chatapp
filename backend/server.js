@@ -6,6 +6,7 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
 import config from './src/config/index.js';
 import { connectDB } from './src/db/index.js';
 import { initializeWebSocket } from './src/websocket/index.js';

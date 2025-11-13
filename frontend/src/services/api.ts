@@ -97,6 +97,25 @@ class ApiService {
     return data
   }
 
+  async getContact(contactId: string): Promise<ApiResponse<any>> {
+    const { data } = await this.api.get(`/contacts/${contactId}`)
+    return data
+  }
+
+  async listContacts(params?: {
+    search?: string
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<any>> {
+    const { data } = await this.api.get('/contacts/list', { params })
+    return data
+  }
+
+  async getOrCreateContactDialog(contactId: string): Promise<ApiResponse<{ dialog: Dialog; isNew: boolean }>> {
+    const { data } = await this.api.get(`/contacts/${contactId}/dialog`)
+    return data
+  }
+
   async getDialog(dialogId: string): Promise<ApiResponse<Dialog>> {
     const { data } = await this.api.get(`/dialogs/${dialogId}`)
     return data
@@ -135,8 +154,8 @@ class ApiService {
     return data
   }
 
-  async getDialogMembers(dialogId: string): Promise<ApiResponse> {
-    const { data } = await this.api.get(`/dialogs/${dialogId}/members`)
+  async getDialogMembers(dialogId: string, params?: { limit?: number }): Promise<ApiResponse> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/members`, { params })
     return data
   }
 

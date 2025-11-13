@@ -24,6 +24,7 @@ import Account from '../src/models/Account.js';
 import User from '../src/models/User.js';
 import Contact from '../src/models/Contact.js';
 import Channel from '../src/models/Channel.js';
+import Service from '../src/models/Service.js';
 
 async function seedData() {
   try {
@@ -98,17 +99,39 @@ async function seedData() {
       console.log(`ℹ️  Channel already exists: ${channel.channelId} - ${channel.type}`);
     }
 
+    // 5. Create Services
+    console.log('\n🔧 Creating Services...');
+    const services = [
+      { type: 'whatsapp', apiUrl: 'https://api.whatsapp.com/v1', description: 'WhatsApp Business API' },
+      { type: 'telegram', apiUrl: 'https://api.telegram.org/bot', description: 'Telegram Bot API' },
+      { type: 'viber', apiUrl: 'https://chatapi.viber.com/pa', description: 'Viber Business Messages API' },
+      { type: 'sms', apiUrl: 'https://api.sms.ru', description: 'SMS.ru API' },
+    ];
+
+    for (const serviceData of services) {
+      let service = await Service.findOne({ type: serviceData.type });
+      if (!service) {
+        service = new Service(serviceData);
+        await service.save();
+        console.log(`✅ Service created: ${service.serviceId} - ${service.type} (${service.apiUrl})`);
+      } else {
+        console.log(`ℹ️  Service already exists: ${service.serviceId} - ${service.type} (${service.apiUrl})`);
+      }
+    }
+
     // Summary
     console.log('\n📊 Summary:');
     const accountCount = await Account.countDocuments();
     const userCount = await User.countDocuments();
     const contactCount = await Contact.countDocuments();
     const channelCount = await Channel.countDocuments();
+    const serviceCount = await Service.countDocuments();
     
     console.log(`   Accounts: ${accountCount}`);
     console.log(`   Users: ${userCount}`);
     console.log(`   Contacts: ${contactCount}`);
     console.log(`   Channels: ${channelCount}`);
+    console.log(`   Services: ${serviceCount}`);
 
     console.log('\n✅ Seeding completed successfully!');
   } catch (error) {

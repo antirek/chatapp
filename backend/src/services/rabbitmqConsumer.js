@@ -1,5 +1,6 @@
 import amqp from 'amqplib';
 import config from '../config/index.js';
+import messageSenderWorker from '../workers/messageSender.js';
 
 /**
  * RabbitMQ Consumer для получения Updates от Chat3
@@ -11,6 +12,8 @@ class RabbitMQConsumer {
     this.channel = null;
     this.userQueues = new Map(); // userId -> { queueName, consumerTag }
     this.isConnected = false;
+    this.globalMessageQueue = null; // Global queue for message sender worker
+    this.globalConsumerTag = null;
   }
 
   /**
@@ -32,6 +35,17 @@ class RabbitMQConsumer {
       this.isConnected = true;
       console.log('✅ RabbitMQ Consumer connected successfully');
       console.log(`   Exchange: ${config.rabbitmq.updatesExchange} (topic)`);
+
+      // Create global queue for message sender worker (only if running as standalone worker)
+      // Check if we're running as a worker process
+      const scriptPath = process.argv[1] || '';
+      const isWorkerProcess = scriptPath.includes('workers/start.js') || 
+                              scriptPath.includes('workers\\start.js') ||
+                              process.env.RUN_AS_WORKER === 'true';
+      
+      if (isWorkerProcess) {
+        await this.createGlobalMessageQueue();
+      }
 
       // Обработка закрытия соединения
       this.connection.on('close', () => {
@@ -179,13 +193,77 @@ class RabbitMQConsumer {
   }
 
   /**
+   * Create global queue for processing all message.create events
+   * This queue is used by the message sender worker to send messages to business contacts
+   */
+  async createGlobalMessageQueue() {
+    if (!this.isConnected) {
+      throw new Error('RabbitMQ Consumer not connected');
+    }
+
+    try {
+      const queueName = 'chatpapp_message_sender_worker';
+
+      // Create durable queue for message sender worker
+      await this.channel.assertQueue(queueName, {
+        durable: true,
+        autoDelete: false,
+        exclusive: false,
+      });
+
+      // Bind to exchange with routing key for all user events
+      // Pattern: user.*.* - matches all events for all users (user.{userId}.{eventType})
+      await this.channel.bindQueue(
+        queueName,
+        config.rabbitmq.updatesExchange,
+        'user.*.*' // Matches all events for all users
+      );
+
+      console.log(`📤 Created global message queue: ${queueName}`);
+      console.log(`   Routing: user.*.*`);
+
+      // Start consuming messages for message sender worker
+      const { consumerTag } = await this.channel.consume(
+        queueName,
+        async (msg) => {
+          if (msg) {
+            try {
+              const update = JSON.parse(msg.content.toString());
+              
+              // Process message through message sender worker
+              await messageSenderWorker.processMessage(update);
+
+              // Acknowledge message
+              this.channel.ack(msg);
+            } catch (error) {
+              console.error('❌ Error in message sender worker:', error.message);
+              // Reject and requeue message (will retry)
+              this.channel.nack(msg, false, true);
+            }
+          }
+        },
+        { noAck: false }
+      );
+
+      this.globalMessageQueue = queueName;
+      this.globalConsumerTag = consumerTag;
+
+      console.log('✅ Message Sender Worker queue created and consuming');
+    } catch (error) {
+      console.error('❌ Failed to create global message queue:', error.message);
+      // Don't throw - worker is optional
+    }
+  }
+
+  /**
    * Получить статистику
    */
   getStats() {
     return {
       isConnected: this.isConnected,
       activeQueues: this.userQueues.size,
-      users: Array.from(this.userQueues.keys())
+      users: Array.from(this.userQueues.keys()),
+      globalMessageQueue: this.globalMessageQueue,
     };
   }
 }

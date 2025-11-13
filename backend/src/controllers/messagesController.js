@@ -1,5 +1,6 @@
 import Chat3Client from '../services/Chat3Client.js';
 import { mapOutgoingMessageType } from '../utils/messageType.js';
+import Channel from '../models/Channel.js';
 
 export async function getDialogMessages(req, res) {
   try {
@@ -89,6 +90,39 @@ export async function sendDialogMessage(req, res) {
 
     if (quotedMessageId) {
       messagePayload.quotedMessageId = quotedMessageId;
+    }
+
+    // Get channelId for business contact dialogs
+    try {
+      const accountId = req.user.accountId;
+      if (accountId) {
+        // Check if this is a business contact dialog
+        const dialog = await Chat3Client.getDialog(dialogId);
+        const dialogData = dialog?.data || dialog;
+        const dialogType = dialogData?.meta?.type?.value || dialogData?.meta?.type || dialogData?.type;
+        
+        if (dialogType === 'personal_contact') {
+          // Get active channel for this account
+          const channel = await Channel.findOne({
+            accountId,
+            isActive: true,
+          }).sort({ createdAt: 1 }); // Get first active channel
+          
+          if (channel && channel.channelId) {
+            // Add channelId to message meta
+            if (!messagePayload.meta) {
+              messagePayload.meta = {};
+            }
+            messagePayload.meta.channelId = { value: channel.channelId };
+            console.log(`✅ Added channelId ${channel.channelId} to message meta for dialog ${dialogId}`);
+          } else {
+            console.warn(`⚠️ No active channel found for account ${accountId}`);
+          }
+        }
+      }
+    } catch (channelError) {
+      // Don't fail message sending if channel lookup fails
+      console.warn('Failed to get channelId for message:', channelError.message);
     }
 
     const result = await Chat3Client.createMessage(dialogId, messagePayload);

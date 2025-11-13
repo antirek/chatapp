@@ -8,6 +8,7 @@ import Account from '../models/Account.js';
 import User from '../models/User.js';
 import Contact from '../models/Contact.js';
 import Channel from '../models/Channel.js';
+import Service from '../models/Service.js';
 
 // Register AdminJS mongoose adapter
 AdminJS.registerAdapter({
@@ -119,6 +120,30 @@ export function initializeAdmin(app) {
           filterProperties: ['channelId', 'accountId', 'type', 'isActive'],
         },
       },
+      {
+        resource: Service,
+        options: {
+          navigation: {
+            name: 'System',
+            icon: 'Settings',
+          },
+          properties: {
+            serviceId: {
+              isVisible: { list: true, filter: true, show: true, edit: false },
+            },
+            createdAt: {
+              isVisible: { list: true, filter: true, show: true, edit: false },
+            },
+            updatedAt: {
+              isVisible: { list: true, filter: true, show: true, edit: false },
+            },
+          },
+          listProperties: ['serviceId', 'type', 'apiUrl', 'isActive', 'updatedAt'],
+          showProperties: ['serviceId', 'type', 'apiUrl', 'description', 'isActive', 'createdAt', 'updatedAt'],
+          editProperties: ['type', 'apiUrl', 'description', 'isActive'],
+          filterProperties: ['serviceId', 'type', 'isActive'],
+        },
+      },
     ],
     branding: {
       companyName: 'ChatApp Admin',
@@ -133,6 +158,7 @@ export function initializeAdmin(app) {
           User: 'Пользователи',
           Contact: 'Контакты',
           Channel: 'Каналы',
+          Service: 'Сервисы',
         },
         properties: {
           accountId: 'ID аккаунта',
@@ -141,9 +167,12 @@ export function initializeAdmin(app) {
           phone: 'Телефон',
           contactId: 'ID контакта',
           channelId: 'ID канала',
+          serviceId: 'ID сервиса',
           type: 'Тип',
           instanceId: 'ID экземпляра',
           token: 'Токен',
+          apiUrl: 'URL API',
+          description: 'Описание',
           isActive: 'Активен',
           createdAt: 'Создан',
           updatedAt: 'Обновлен',

@@ -205,13 +205,19 @@ export async function processP2PDialog(dialog, currentUser) {
       ...dialog,
       name: personalizedName,
       avatar: personalizedAvatar ?? null,
-      chatType: 'p2p',
+      chatType: dialogType === 'personal_contact' ? 'personal_contact' : 'p2p',
     };
   }
 
   const { name, avatar } = await ensureP2PMeta(dialog, currentUserId);
 
-  const resolvedName = name ?? personalizedName ?? dialog.dialogId;
+  // For personal_contact dialogs, use dialog.name (contact name) as fallback
+  // For p2p dialogs, use dialog.dialogId as fallback
+  const nameFallback = dialogType === 'personal_contact' 
+    ? (dialog.name || dialog.dialogName || dialog.dialogId)
+    : dialog.dialogId;
+  
+  const resolvedName = name ?? personalizedName ?? nameFallback;
   const resolvedAvatar =
     avatar ?? personalizedAvatar ?? dialog.avatar ?? null;
 
@@ -219,7 +225,7 @@ export async function processP2PDialog(dialog, currentUser) {
     ...dialog,
     name: resolvedName,
     avatar: resolvedAvatar,
-    chatType: 'p2p',
+    chatType: dialogType === 'personal_contact' ? 'personal_contact' : 'p2p',
   };
 }
 
@@ -412,7 +418,19 @@ export async function createDialog(req, res) {
 
     const dialogId = dialog.data.dialogId || dialog.data._id;
 
+    // Add creator as member with memberType=user
     await Chat3Client.addDialogMember(dialogId, req.user.userId);
+    try {
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${req.user.userId}`,
+        'memberType',
+        { value: 'user' }
+      );
+      console.log(`✅ Set memberType=user for creator ${req.user.userId} in dialog ${dialogId}`);
+    } catch (error) {
+      console.warn(`Failed to set memberType meta tag for creator in dialog ${dialogId}:`, error.message);
+    }
 
     if (finalChatType === 'group') {
       try {
@@ -432,8 +450,20 @@ export async function createDialog(req, res) {
       }
     }
 
+    // Add other members with memberType=user
     for (const memberId of memberIds) {
       await Chat3Client.addDialogMember(dialogId, memberId);
+      try {
+        await Chat3Client.setMeta(
+          'dialogMember',
+          `${dialogId}:${memberId}`,
+          'memberType',
+          { value: 'user' }
+        );
+        console.log(`✅ Set memberType=user for member ${memberId} in dialog ${dialogId}`);
+      } catch (error) {
+        console.warn(`Failed to set memberType meta tag for member ${memberId} in dialog ${dialogId}:`, error.message);
+      }
     }
 
     try {
@@ -590,6 +620,17 @@ export async function joinPublicDialog(req, res) {
     }
 
     await Chat3Client.addDialogMember(dialogId, currentUserId);
+    try {
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${currentUserId}`,
+        'memberType',
+        { value: 'user' }
+      );
+      console.log(`✅ Set memberType=user for user ${currentUserId} in dialog ${dialogId}`);
+    } catch (error) {
+      console.warn(`Failed to set memberType meta tag for user ${currentUserId} in dialog ${dialogId}:`, error.message);
+    }
 
     const userName = await resolveUserName(currentUserId, req.user?.name || null);
 
@@ -795,6 +836,17 @@ export async function addDialogMember(req, res) {
     }
 
     await Chat3Client.addDialogMember(dialogId, userId);
+    try {
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${userId}`,
+        'memberType',
+        { value: 'user' }
+      );
+      console.log(`✅ Set memberType=user for member ${userId} in dialog ${dialogId}`);
+    } catch (error) {
+      console.warn(`Failed to set memberType meta tag for member ${userId} in dialog ${dialogId}:`, error.message);
+    }
 
     const userName = await resolveUserName(userId, null);
 

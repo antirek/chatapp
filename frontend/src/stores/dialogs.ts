@@ -383,6 +383,10 @@ export const useDialogsStore = defineStore('dialogs', () => {
     isSearching.value = false
   }
 
+  function setCurrentDialog(dialog: Dialog) {
+    currentDialog.value = normalizeDialog(dialog)
+  }
+
   return {
     dialogs,
     currentDialog,
@@ -395,6 +399,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     loadMoreDialogs,
     createDialog,
     selectDialog,
+    setCurrentDialog,
     updateDialogUnreadCount,
     incrementUnreadCount,
     updateLastMessage,

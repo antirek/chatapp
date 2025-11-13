@@ -38,9 +38,9 @@
         
         <!-- Info Button -->
         <button
-          @click="openUserInfo"
+          @click="openDialogInfo"
           class="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Информация о собеседнике"
+          title="Информация о диалоге"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -240,20 +240,11 @@
       @cancel-quote="handleCancelQuote"
     />
 
-    <!-- User Info Modal (for P2P chats) -->
-    <UserInfoModal
-      v-if="!isGroupChat"
-      :is-open="isUserInfoOpen"
-      :user="otherUser"
-      @close="closeUserInfo"
-    />
-
-    <!-- Group Info Modal (for group chats) -->
-    <GroupInfoModal
-      v-if="isGroupChat"
-      :is-open="isUserInfoOpen"
+    <!-- Dialog Info Modal (unified for all dialog types) -->
+    <DialogInfoModal
+      :is-open="isDialogInfoOpen"
       :dialog="dialog"
-      @close="closeUserInfo"
+      @close="closeDialogInfo"
       @add-members="handleAddMembers"
       @left-group="handleLeftGroup"
     />
@@ -278,8 +269,7 @@ import { useDialogsStore } from '@/stores/dialogs'
 import { formatTypingUsers } from '@/utils/typing'
 import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
-import UserInfoModal from './UserInfoModal.vue'
-import GroupInfoModal from './GroupInfoModal.vue'
+import DialogInfoModal from './DialogInfoModal.vue'
 import AddGroupMembersModal from './AddGroupMembersModal.vue'
 import Avatar from './Avatar.vue'
 import type { Dialog, Message, SendMessageData } from '@/types'
@@ -309,7 +299,7 @@ const messagesStore = useMessagesStore()
 const dialogsStore = useDialogsStore()
 const messagesContainer = ref<HTMLElement>()
 
-const isUserInfoOpen = ref(false)
+const isDialogInfoOpen = ref(false)
 const isAddMembersOpen = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
@@ -873,21 +863,16 @@ async function loadOtherUserInfo() {
   }
 }
 
-async function openUserInfo() {
-  // For P2P chats, load fresh user info if needed
-  if (!isGroupChat.value && !otherUser.value) {
-    await loadOtherUserInfo()
-  }
+async function openDialogInfo() {
   // For group chats, load existing member IDs for AddGroupMembersModal
   if (isGroupChat.value) {
     await loadExistingMemberIds()
   }
-  // For group chats, GroupInfoModal will load members itself
-  isUserInfoOpen.value = true
+  isDialogInfoOpen.value = true
 }
 
-function closeUserInfo() {
-  isUserInfoOpen.value = false
+function closeDialogInfo() {
+  isDialogInfoOpen.value = false
 }
 
 async function loadExistingMemberIds() {
@@ -902,8 +887,8 @@ async function loadExistingMemberIds() {
 }
 
 async function handleAddMembers() {
-  // Close GroupInfoModal
-  closeUserInfo()
+  // Close DialogInfoModal
+  closeDialogInfo()
   
   // Load existing member IDs
   await loadExistingMemberIds()

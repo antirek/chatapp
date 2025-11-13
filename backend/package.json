@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "worker": "node --watch src/workers/start.js",
+    "worker:start": "node src/workers/start.js"
   },
   "keywords": [
     "chat",

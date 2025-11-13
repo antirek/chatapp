@@ -99,10 +99,31 @@ export async function createBusinessContact(req, res) {
 
     console.log(`✅ Dialog created for contact: ${dialogId} with meta tags`);
 
-    // Add current user as member
+    // Add contact as member with memberType=contact
+    try {
+      await Chat3Client.addDialogMember(dialogId, contact.contactId);
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${contact.contactId}`,
+        'memberType',
+        { value: 'contact' }
+      );
+      console.log(`✅ Added contact ${contact.contactId} to dialog ${dialogId} with memberType=contact`);
+    } catch (contactMemberError) {
+      console.error('Failed to add contact as member:', contactMemberError);
+      // Continue - we'll try to clean up if user addition also fails
+    }
+
+    // Add current user as member with memberType=user
     try {
       await Chat3Client.addDialogMember(dialogId, currentUserId);
-      console.log(`✅ Added user ${currentUserId} to dialog ${dialogId}`);
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${currentUserId}`,
+        'memberType',
+        { value: 'user' }
+      );
+      console.log(`✅ Added user ${currentUserId} to dialog ${dialogId} with memberType=user`);
     } catch (memberError) {
       // If adding member fails, delete the dialog and contact
       try {
@@ -156,3 +177,281 @@ export async function createBusinessContact(req, res) {
   }
 }
 
+/**
+ * Get business contact by ID
+ */
+export async function getContact(req, res) {
+  try {
+    const { contactId } = req.params;
+    const accountId = req.user.accountId;
+
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User accountId is required',
+      });
+    }
+
+    const contact = await Contact.findOne({
+      contactId,
+      accountId, // Ensure contact belongs to user's account
+    });
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        error: 'Contact not found',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        contactId: contact.contactId,
+        accountId: contact.accountId,
+        name: contact.name,
+        phone: contact.phone,
+        createdAt: contact.createdAt,
+        updatedAt: contact.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting contact:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get contact',
+    });
+  }
+}
+
+/**
+ * Get list of business contacts with optional search filter
+ */
+export async function listContacts(req, res) {
+  try {
+    const accountId = req.user.accountId;
+    const { search, page = 1, limit = 50 } = req.query;
+
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User accountId is required',
+      });
+    }
+
+    // Build query
+    const query = { accountId };
+
+    // Add search filter if provided
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      query.name = searchRegex;
+    }
+
+    // Calculate pagination
+    const skip = (Number(page) - 1) * Number(limit);
+    const parsedLimit = Number(limit);
+
+    // Get contacts
+    const contacts = await Contact.find(query)
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(parsedLimit)
+      .lean();
+
+    // Get total count for pagination
+    const total = await Contact.countDocuments(query);
+
+    return res.json({
+      success: true,
+      data: contacts.map(contact => ({
+        contactId: contact.contactId,
+        accountId: contact.accountId,
+        name: contact.name,
+        phone: contact.phone,
+        createdAt: contact.createdAt,
+        updatedAt: contact.updatedAt,
+      })),
+      pagination: {
+        page: Number(page),
+        limit: parsedLimit,
+        total,
+        pages: Math.ceil(total / parsedLimit),
+      },
+    });
+  } catch (error) {
+    console.error('Error listing contacts:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to list contacts',
+    });
+  }
+}
+
+/**
+ * Get or create dialog for a business contact
+ */
+export async function getOrCreateContactDialog(req, res) {
+  try {
+    const { contactId } = req.params;
+    const currentUserId = req.user.userId;
+    const accountId = req.user.accountId;
+
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User accountId is required',
+      });
+    }
+
+    // Find contact
+    const contact = await Contact.findOne({
+      contactId,
+      accountId,
+    });
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        error: 'Contact not found',
+      });
+    }
+
+    // Try to find existing dialog by contactId meta tag
+    try {
+      // Search for dialogs with contactId meta tag
+      // First, get all user dialogs and filter client-side
+      const dialogsResponse = await Chat3Client.getUserDialogs(currentUserId, {
+        page: 1,
+        limit: 100, // Get more dialogs to find the one with contactId
+      });
+
+      const allDialogs = dialogsResponse?.data || dialogsResponse || [];
+      
+      // Filter dialogs by contactId meta tag
+      const dialogs = allDialogs.filter(dialog => {
+        const dialogContactId = dialog.meta?.contactId?.value || dialog.meta?.contactId;
+        return dialogContactId === contactId;
+      });
+      
+      if (dialogs.length > 0) {
+        // Dialog exists, check if user is a member
+        const existingDialog = dialogs[0];
+        const dialogId = existingDialog.dialogId || existingDialog._id;
+
+        // Check if user is already a member
+        try {
+          const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 100 });
+          const members = membersResponse?.data || membersResponse || [];
+          const isMember = Array.isArray(members) && members.some(m => (m.userId || m._id) === currentUserId);
+
+          if (!isMember) {
+            // Add user to dialog with memberType=user
+            await Chat3Client.addDialogMember(dialogId, currentUserId);
+            await Chat3Client.setMeta(
+              'dialogMember',
+              `${dialogId}:${currentUserId}`,
+              'memberType',
+              { value: 'user' }
+            );
+            console.log(`✅ Added user ${currentUserId} to existing dialog ${dialogId} with memberType=user`);
+          }
+
+          // Get full dialog details
+          const fullDialog = await Chat3Client.getDialog(dialogId);
+          const fullDialogData = fullDialog.data || fullDialog;
+          
+          // Process dialog
+          const processedDialog = await processP2PDialog(fullDialogData, req.user);
+
+          return res.json({
+            success: true,
+            data: {
+              dialog: {
+                ...processedDialog,
+                chatType: 'personal_contact',
+              },
+              isNew: false,
+            },
+          });
+        } catch (memberError) {
+          console.error('Error checking/adding member:', memberError);
+          // Continue to create new dialog if member check fails
+        }
+      }
+    } catch (searchError) {
+      console.warn('Error searching for existing dialog:', searchError);
+      // Continue to create new dialog if search fails
+    }
+
+    // Dialog doesn't exist or search failed, create new one
+    const dialogName = contact.name;
+    
+    const dialogResponse = await Chat3Client.createDialog({
+      name: dialogName,
+      createdBy: currentUserId,
+      meta: {
+        type: { value: 'personal_contact' },
+        contactId: { value: contact.contactId },
+      },
+    });
+    
+    const dialogId = dialogResponse?.data?.dialogId || dialogResponse?.data?._id || dialogResponse?.dialogId || dialogResponse?._id;
+    
+    if (!dialogId) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create dialog: dialogId not found in response',
+      });
+    }
+
+    // Add contact as member with memberType=contact
+    try {
+      await Chat3Client.addDialogMember(dialogId, contact.contactId);
+      await Chat3Client.setMeta(
+        'dialogMember',
+        `${dialogId}:${contact.contactId}`,
+        'memberType',
+        { value: 'contact' }
+      );
+      console.log(`✅ Added contact ${contact.contactId} to dialog ${dialogId} with memberType=contact`);
+    } catch (contactMemberError) {
+      console.error('Failed to add contact as member:', contactMemberError);
+      // Continue - we'll try to clean up if user addition also fails
+    }
+
+    // Add current user as member with memberType=user
+    await Chat3Client.addDialogMember(dialogId, currentUserId);
+    await Chat3Client.setMeta(
+      'dialogMember',
+      `${dialogId}:${currentUserId}`,
+      'memberType',
+      { value: 'user' }
+    );
+    console.log(`✅ Created dialog ${dialogId} and added user ${currentUserId} with memberType=user`);
+
+    // Get full dialog details
+    const fullDialog = await Chat3Client.getDialog(dialogId);
+    const fullDialogData = fullDialog.data || fullDialog;
+    
+    // Process dialog
+    const processedDialog = await processP2PDialog(fullDialogData, req.user);
+
+    return res.json({
+      success: true,
+      data: {
+        dialog: {
+          ...processedDialog,
+          chatType: 'personal_contact',
+        },
+        isNew: true,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting or creating contact dialog:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get or create contact dialog',
+    });
+  }
+}
