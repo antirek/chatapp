@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import config from './src/config/index.js';
 import { connectDB } from './src/db/index.js';
 import { initializeWebSocket } from './src/websocket/index.js';
+import { initializeAdmin } from './src/admin/index.js';
 
 // Import routes
 import authRoutes from './src/routes/auth.js';
@@ -16,6 +17,7 @@ import dialogRoutes from './src/routes/dialogs.js';
 import messageRoutes from './src/routes/messages.js';
 import dialogMessageRoutes from './src/routes/dialogMessages.js';
 import userRoutes from './src/routes/users.js';
+import contactRoutes from './src/routes/contacts.js';
 
 // Initialize Express app
 const app = express();
@@ -58,7 +60,22 @@ const swaggerOptions = {
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
 // Middleware
-app.use(helmet());
+// Configure helmet with CSP that allows AdminJS inline scripts
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Required for AdminJS
+      styleSrc: ["'self'", "'unsafe-inline'"], // Required for AdminJS
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", "data:", "https:"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+}));
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -86,20 +103,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Favicon endpoint (to avoid 404 errors)
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/dialogs', dialogRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/dialog', dialogMessageRoutes);
 app.use('/api/users', userRoutes);
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found',
-  });
-});
+app.use('/api/contacts', contactRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -116,6 +131,17 @@ async function startServer() {
   try {
     // Connect to MongoDB
     await connectDB();
+
+    // Initialize AdminJS (after DB connection)
+    const adminJs = initializeAdmin(app);
+
+    // 404 handler (after AdminJS initialization)
+    app.use((req, res) => {
+      res.status(404).json({
+        success: false,
+        error: 'Route not found',
+      });
+    });
 
     // Initialize WebSocket and RabbitMQ
     const io = await initializeWebSocket(server);

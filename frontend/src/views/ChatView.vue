@@ -86,34 +86,63 @@
       <div class="p-4 border-b border-gray-200">
         <div class="flex items-center justify-between mb-2">
           <h1 class="text-xl font-bold text-gray-900">Чаты</h1>
-          <div class="flex items-center space-x-2">
+          <div class="relative">
             <button
-              @click="openCreateGroup"
+              @click="toggleContextMenu"
               class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Создать группу"
+              title="Меню действий"
             >
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
               </svg>
             </button>
-            <button
-              @click="openPublicGroups"
-              class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Публичные группы"
-            >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-              </svg>
-            </button>
-            <button
-              @click="openCreateDialog"
-              class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Создать чат"
-            >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
+            
+            <!-- Context Menu -->
+            <Transition name="menu">
+              <div
+                v-if="isContextMenuOpen"
+                @click.stop
+                class="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
+              >
+                <button
+                  @click="handleMenuAction('create-dialog')"
+                  class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Создать чат
+                </button>
+                <button
+                  @click="handleMenuAction('create-group')"
+                  class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Создать группу
+                </button>
+                <button
+                  @click="handleMenuAction('public-groups')"
+                  class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                  </svg>
+                  Публичные группы
+                </button>
+                <div class="border-t border-gray-200 my-1"></div>
+                <button
+                  @click="handleMenuAction('create-business-contact')"
+                  class="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  </svg>
+                  Создать бизнес-контакт
+                </button>
+              </div>
+            </Transition>
           </div>
         </div>
       </div>
@@ -178,11 +207,17 @@
       @close="closePublicGroups"
       @group-joined="handleGroupJoined"
     />
+
+    <!-- Create Business Contact Modal -->
+    <CreateBusinessContactModal
+      :is-open="isCreateBusinessContactOpen"
+      @close="closeCreateBusinessContact"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogsStore } from '@/stores/dialogs'
@@ -195,6 +230,7 @@ import CreateDialogModal from '@/components/CreateDialogModal.vue'
 import CreateGroupModal from '@/components/CreateGroupModal.vue'
 import AddGroupMembersModal from '@/components/AddGroupMembersModal.vue'
 import PublicGroupsModal from '@/components/PublicGroupsModal.vue'
+import CreateBusinessContactModal from '@/components/CreateBusinessContactModal.vue'
 import UserProfile from '@/components/UserProfile.vue'
 import Avatar from '@/components/Avatar.vue'
 import { useNotificationSound } from '@/composables/useNotificationSound'
@@ -209,7 +245,9 @@ const isCreateDialogOpen = ref(false)
 const isCreateGroupOpen = ref(false)
 const isAddMembersOpen = ref(false)
 const isPublicGroupsOpen = ref(false)
+const isCreateBusinessContactOpen = ref(false)
 const isUserProfileOpen = ref(false)
+const isContextMenuOpen = ref(false)
 const currentUserAvatar = ref<string | null>(null)
 const currentGroupDialogId = ref<string | null>(null)
 const currentGroupMemberIds = ref<string[]>([])
@@ -237,6 +275,13 @@ onMounted(async () => {
 
   // Load current user avatar
   await loadCurrentUserAvatar()
+
+  // Setup click outside handler for context menu
+  document.addEventListener('click', handleClickOutside)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 
 async function handleReconnect() {
@@ -644,6 +689,51 @@ function closePublicGroups() {
   isPublicGroupsOpen.value = false
 }
 
+function openCreateBusinessContact() {
+  isCreateBusinessContactOpen.value = true
+}
+
+function closeCreateBusinessContact() {
+  isCreateBusinessContactOpen.value = false
+}
+
+function toggleContextMenu() {
+  isContextMenuOpen.value = !isContextMenuOpen.value
+}
+
+function closeContextMenu() {
+  isContextMenuOpen.value = false
+}
+
+function handleMenuAction(action: string) {
+  closeContextMenu()
+  
+  switch (action) {
+    case 'create-dialog':
+      openCreateDialog()
+      break
+    case 'create-group':
+      openCreateGroup()
+      break
+    case 'public-groups':
+      openPublicGroups()
+      break
+    case 'create-business-contact':
+      openCreateBusinessContact()
+      break
+  }
+}
+
+function handleClickOutside(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  const menuButton = target.closest('[title="Меню действий"]')
+  const menu = target.closest('.absolute.right-0.top-full')
+  
+  if (!menuButton && !menu && isContextMenuOpen.value) {
+    closeContextMenu()
+  }
+}
+
 async function handleGroupJoined(dialogId: string) {
   try {
     // Close public groups modal
@@ -659,4 +749,17 @@ async function handleGroupJoined(dialogId: string) {
   }
 }
 </script>
+
+<style scoped>
+.menu-enter-active,
+.menu-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>
 

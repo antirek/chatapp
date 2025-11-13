@@ -14,7 +14,7 @@ class ApiService {
 
   constructor() {
     this.api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
+      baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3010/api',
       timeout: 10000,
       headers: {
         'Content-Type': 'application/json'
@@ -86,6 +86,14 @@ class ApiService {
     groupType?: 'private' | 'public'
   }): Promise<ApiResponse<Dialog>> {
     const { data } = await this.api.post('/dialogs', dialogData)
+    return data
+  }
+
+  async createBusinessContact(contactData: {
+    name: string
+    phone: string
+  }): Promise<ApiResponse<{ contact: any; dialog: Dialog }>> {
+    const { data } = await this.api.post('/contacts', contactData)
     return data
   }
 

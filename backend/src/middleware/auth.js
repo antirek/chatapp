@@ -26,7 +26,17 @@ export const authenticate = async (req, res, next) => {
       userId: user.userId,
       phone: user.phone,
       name: user.name,
+      accountId: user.accountId,
     };
+
+    // Log if accountId is missing (for debugging)
+    if (!req.user.accountId) {
+      console.warn(`⚠️ User ${req.user.userId} authenticated but accountId is missing. User object:`, {
+        userId: user.userId,
+        hasAccountId: !!user.accountId,
+        accountId: user.accountId,
+      });
+    }
 
     next();
   } catch (error) {

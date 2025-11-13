@@ -13,7 +13,7 @@ class WebSocketService {
       return
     }
 
-    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001'
+    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3010'
 
     this.socket = io(wsUrl, {
       auth: { token }

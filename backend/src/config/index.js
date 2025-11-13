@@ -7,7 +7,7 @@ dotenv.config();
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
 
 const config = {
-  port: process.env.PORT || 3001,
+  port: process.env.PORT || 3010,
   nodeEnv: process.env.NODE_ENV || 'development',
   
   mongodb: {

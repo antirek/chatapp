@@ -18,6 +18,12 @@ function generateUserId() {
 }
 
 const userSchema = new mongoose.Schema({
+  accountId: {
+    type: String,
+    required: true,
+    index: true,
+    // Note: accountId is a custom string ID, not ObjectId, so no ref
+  },
   userId: {
     type: String,
     unique: true,
@@ -28,10 +34,11 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     required: true,
-    unique: true,
     match: /^79\d{9}$/,
     index: true,
   },
+  // Compound unique index: phone + accountId (user can have same phone in different accounts)
+  // Note: unique: true removed from phone field above
   name: {
     type: String,
     required: true,
@@ -53,6 +60,9 @@ const userSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+// Compound unique index: phone + accountId (user can have same phone in different accounts)
+userSchema.index({ accountId: 1, phone: 1 }, { unique: true });
 
 // Generate userId before saving new user
 userSchema.pre('save', async function(next) {

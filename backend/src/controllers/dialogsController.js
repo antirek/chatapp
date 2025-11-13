@@ -180,7 +180,7 @@ async function ensureP2PMeta(dialog, currentUserId) {
   }
 }
 
-async function processP2PDialog(dialog, currentUser) {
+export async function processP2PDialog(dialog, currentUser) {
   const currentUserId =
     typeof currentUser === 'string' ? currentUser : currentUser?.userId;
 
@@ -190,7 +190,8 @@ async function processP2PDialog(dialog, currentUser) {
 
   const dialogType = dialog.meta?.type || dialog.type;
 
-  if (dialogType !== 'p2p') {
+  // Process both p2p and personal_contact dialogs
+  if (dialogType !== 'p2p' && dialogType !== 'personal_contact') {
     return dialog;
   }
 
