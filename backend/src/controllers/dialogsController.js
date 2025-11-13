@@ -734,57 +734,39 @@ export async function getDialogMembers(req, res) {
 
           let role = null;
 
+          // Note: Chat3 API doesn't support /api/meta/dialogMember/{entityId}/role endpoint (returns 404)
+          // So we only request all meta tags and extract role from there
           try {
-            const roleMeta = await Chat3Client.getMeta('dialogMember', entityId, 'role');
+            const metaResponse = await Chat3Client.getMeta('dialogMember', entityId);
             console.log(
-              `🔍 Getting role key for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`,
-              roleMeta,
+              `🔍 Getting all meta for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`,
+              {
+                entityId,
+                metaResponse,
+                metaType: typeof metaResponse,
+                metaKeys: metaResponse ? Object.keys(metaResponse) : null,
+              },
             );
-            role =
-              roleMeta?.value ||
-              roleMeta?.data?.value ||
-              roleMeta?.data ||
-              roleMeta ||
-              null;
-          } catch (keyError) {
-            if (keyError.response?.status !== 404) {
-              console.warn(
-                `⚠️ Error getting role key for member ${member.userId} with entityId ${entityId}:`,
-                keyError.message,
-              );
-            } else {
-              try {
-                const metaResponse = await Chat3Client.getMeta('dialogMember', entityId);
-                console.log(
-                  `🔍 Getting all meta for member ${member.userId} in dialog ${dialogId} (entityId: ${entityId}):`,
-                  {
-                    entityId,
-                    metaResponse,
-                    metaType: typeof metaResponse,
-                    metaKeys: metaResponse ? Object.keys(metaResponse) : null,
-                  },
-                );
 
-                role =
-                  metaResponse?.role?.value ||
-                  metaResponse?.role ||
-                  metaResponse?.data?.role?.value ||
-                  metaResponse?.data?.role ||
-                  (metaResponse?.data &&
-                  typeof metaResponse.data === 'object' &&
-                  'role' in metaResponse.data
-                    ? metaResponse.data.role
-                    : null) ||
-                  null;
-              } catch (metaError) {
-                if (metaError.response?.status !== 404) {
-                  console.warn(
-                    `⚠️ Error getting meta for member ${member.userId} with entityId ${entityId}:`,
-                    metaError.message,
-                  );
-                }
-              }
+            role =
+              metaResponse?.role?.value ||
+              metaResponse?.role ||
+              metaResponse?.data?.role?.value ||
+              metaResponse?.data?.role ||
+              (metaResponse?.data &&
+              typeof metaResponse.data === 'object' &&
+              'role' in metaResponse.data
+                ? metaResponse.data.role
+                : null) ||
+              null;
+          } catch (metaError) {
+            if (metaError.response?.status !== 404) {
+              console.warn(
+                `⚠️ Error getting meta for member ${member.userId} with entityId ${entityId}:`,
+                metaError.message,
+              );
             }
+            // If 404, role will remain null (member has no role meta)
           }
 
           if (!role) {
@@ -982,14 +964,19 @@ export async function toggleDialogFavorite(req, res) {
     }
 
     // Check if favorite already exists
+    // Note: Chat3 API doesn't support /api/meta/dialog/:dialogId/:key endpoint (returns 404)
+    // So we request all meta tags and check if the key exists
     let isFavorite = false;
     try {
-      const existingMeta = await Chat3Client.getMeta('dialog', dialogId, metaKey);
-      isFavorite = !!existingMeta;
+      const allMeta = await Chat3Client.getMeta('dialog', dialogId);
+      // Check if metaKey exists in the response
+      const metaValue = allMeta?.[metaKey]?.value || allMeta?.[metaKey] || allMeta?.data?.[metaKey]?.value || allMeta?.data?.[metaKey];
+      isFavorite = !!metaValue;
     } catch (error) {
       if (error.response?.status !== 404) {
         throw error;
       }
+      // If dialog not found (404), isFavorite remains false
     }
 
     if (isFavorite) {
