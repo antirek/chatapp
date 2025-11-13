@@ -107,7 +107,7 @@ export async function updateP2PPersonalization(dialogId, userIdA, userIdB) {
       setDialogMeta(dialogId, dialogNameKey(userIdB), nameForB),
       setDialogMeta(dialogId, dialogAvatarKey(userIdA), avatarForA),
       setDialogMeta(dialogId, dialogAvatarKey(userIdB), avatarForB),
-      cleanupLegacyMeta(dialogId, [userIdA, userIdB]),
+      cleanupLegacyMeta(dialogId),
     ];
 
     await Promise.all(tasks);
@@ -121,7 +121,9 @@ export async function updateP2PPersonalization(dialogId, userIdA, userIdB) {
   }
 }
 
-async function cleanupLegacyMeta(dialogId, userIds = []) {
+async function cleanupLegacyMeta(dialogId) {
+  // Note: Removed DELETE requests for nameFor_${userId} and avatarFor_${userId}
+  // as Chat3 API returns 404 for these endpoints and they are not supported
   const deletions = [
     Chat3Client.deleteMeta('dialog', dialogId, 'searchTokens').catch((error) => {
       if (error.response?.status !== 404) {
@@ -140,29 +142,8 @@ async function cleanupLegacyMeta(dialogId, userIds = []) {
     }),
   ];
 
-  userIds.forEach((userId) => {
-    deletions.push(
-      Chat3Client.deleteMeta('dialog', dialogId, `nameFor_${userId}`).catch((error) => {
-        if (error.response?.status !== 404) {
-          console.warn(
-            `⚠️ Failed to delete legacy name meta nameFor_${userId} for ${dialogId}:`,
-            error.message
-          );
-        }
-      })
-    );
-
-    deletions.push(
-      Chat3Client.deleteMeta('dialog', dialogId, `avatarFor_${userId}`).catch((error) => {
-        if (error.response?.status !== 404) {
-          console.warn(
-            `⚠️ Failed to delete legacy avatar meta avatarFor_${userId} for ${dialogId}:`,
-            error.message
-          );
-        }
-      })
-    );
-  });
+  // Removed: DELETE requests for nameFor_${userId} and avatarFor_${userId}
+  // These endpoints return 404 in Chat3 API and are not supported
 
   await Promise.all(deletions);
 }

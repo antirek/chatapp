@@ -2,7 +2,7 @@ import Channel from '../models/Channel.js';
 import Service from '../models/Service.js';
 import Contact from '../models/Contact.js';
 import Chat3Client from '../services/Chat3Client.js';
-import WhatsappClient from '../services/WhatsappClient.js';
+import { WhatsAppApiClient } from '../services/whatsapp-api-client.js';
 
 /**
  * Message Sender Worker
@@ -33,23 +33,44 @@ class MessageSenderWorker {
    */
   async processMessage(update) {
     try {
+      // Log received update data
+      console.log('📥 Received update:', JSON.stringify({
+        eventType: update.eventType,
+        entityId: update.entityId,
+        userId: update.userId,
+        dataKeys: update.data ? Object.keys(update.data) : [],
+        dialogId: update.dialogId,
+        hasDialog: !!update.dialog,
+      }, null, 2));
+
+      // Check if update is for a business contact (cnt_...)
+      // Only process updates intended for business contacts, not for regular users (usr_...)
+      if (!update.userId || !update.userId.startsWith('cnt_')) {
+        console.log(`⏭️  Update is not for a business contact (userId: ${update.userId || 'missing'})`);
+        return;
+      }
+
       // Only process message.create events
       if (update.eventType !== 'message.create') {
+        console.log(`⏭️  Skipping event type: ${update.eventType}`);
         return;
       }
 
       const message = update.data;
       if (!message) {
+        console.log('⏭️  No message data in update');
         return;
       }
 
       const messageId = message.messageId || message._id;
       if (!messageId) {
+        console.log('⏭️  No messageId found in message');
         return;
       }
 
       // Avoid processing the same message twice
       if (this.processedMessages.has(messageId)) {
+        console.log(`⏭️  Message ${messageId} already processed, skipping`);
         return;
       }
 
@@ -57,14 +78,30 @@ class MessageSenderWorker {
       const senderId = message.senderId;
       if (!senderId || !senderId.startsWith('usr_')) {
         // Not from a user, skip
+        console.log(`⏭️  Message ${messageId} is not from a user (senderId: ${senderId})`);
         return;
       }
+
+      // START: Begin processing
+      console.log(`\n🚀 [START] Processing message ${messageId}`);
+      console.log('📋 Message data:', JSON.stringify({
+        messageId,
+        senderId,
+        dialogId: message.dialogId,
+        type: message.type,
+        content: message.content?.substring(0, 100) + (message.content?.length > 100 ? '...' : ''),
+        meta: message.meta,
+      }, null, 2));
 
       // Get dialog to verify it's a business contact dialog
       const dialogId = message.dialogId || update.dialogId || update.entityId;
       if (!dialogId) {
+        console.log(`⏭️  No dialogId found for message ${messageId}`);
+        console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (no dialogId)`);
         return;
       }
+
+      console.log(`📂 Dialog ID: ${dialogId}`);
 
       // Try to get dialog data from update first (if available)
       // Chat3 may include dialog data in update.dialog or update.data.dialog
@@ -74,17 +111,21 @@ class MessageSenderWorker {
 
       // If dialog data is in update, use it (no API call needed)
       if (dialogData) {
+        console.log('📂 Using dialog data from update');
         dialogType = dialogData?.meta?.type?.value || dialogData?.meta?.type || dialogData?.type;
         contactId = dialogData?.meta?.contactId?.value || dialogData?.meta?.contactId;
       } else {
         // Fallback: fetch dialog from API only if not in update
+        console.log(`📂 Fetching dialog ${dialogId} from API...`);
         try {
           const dialog = await Chat3Client.getDialog(dialogId);
           dialogData = dialog?.data || dialog;
           dialogType = dialogData?.meta?.type?.value || dialogData?.meta?.type || dialogData?.type;
           contactId = dialogData?.meta?.contactId?.value || dialogData?.meta?.contactId;
+          console.log(`📂 Dialog fetched: type=${dialogType}, contactId=${contactId}`);
         } catch (error) {
           console.error(`❌ Failed to fetch dialog ${dialogId}:`, error.message);
+          console.log(`🏁 [END] Processing message ${messageId} - FAILED (dialog fetch error)`);
           return;
         }
       }
@@ -94,40 +135,70 @@ class MessageSenderWorker {
         // Check if dialog is personal_contact type
         if (dialogType !== 'personal_contact') {
           // Not a business contact dialog
+          console.log(`⏭️  Dialog type is ${dialogType}, not personal_contact`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (not personal_contact)`);
           return;
         }
 
         if (!contactId) {
           console.warn(`⚠️ Dialog ${dialogId} is personal_contact but has no contactId`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (no contactId)`);
           return;
         }
+
 
         // Check if message has channelId in meta
         const channelId = message.meta?.channelId?.value || message.meta?.channelId;
         if (!channelId) {
           // No channelId, cannot send message
           console.warn(`⚠️ Message ${messageId} has no channelId in meta`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (no channelId)`);
           return;
         }
+
+        console.log(`📊 Processing data:`, JSON.stringify({
+          messageId,
+          dialogId,
+          dialogType,
+          contactId,
+          isBusinessContact: contactId.startsWith('cnt_'),
+          channelId,
+        }, null, 2));
 
         // Get contact information
         const contact = await Contact.findOne({ contactId });
         if (!contact) {
           console.warn(`⚠️ Contact ${contactId} not found in database`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (contact not found)`);
           return;
         }
+
+        console.log(`👤 Contact data:`, JSON.stringify({
+          contactId: contact.contactId,
+          name: contact.name,
+          phone: contact.phone,
+        }, null, 2));
 
         // Get channel information
         const channel = await Channel.findOne({ channelId });
         if (!channel) {
           console.warn(`⚠️ Channel ${channelId} not found in database`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (channel not found)`);
           return;
         }
 
         if (!channel.isActive) {
           console.warn(`⚠️ Channel ${channelId} is not active`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (channel inactive)`);
           return;
         }
+
+        console.log(`📡 Channel data:`, JSON.stringify({
+          channelId: channel.channelId,
+          type: channel.type,
+          instanceId: channel.instanceId,
+          isActive: channel.isActive,
+        }, null, 2));
 
         // Get service information for this channel type
         const service = await Service.findOne({
@@ -137,8 +208,16 @@ class MessageSenderWorker {
 
         if (!service) {
           console.warn(`⚠️ No active service found for type ${channel.type}`);
+          console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (service not found)`);
           return;
         }
+
+        console.log(`🔧 Service data:`, JSON.stringify({
+          serviceId: service.serviceId,
+          type: service.type,
+          apiUrl: service.apiUrl,
+          isActive: service.isActive,
+        }, null, 2));
 
         // Mark message as processed
         this.processedMessages.add(messageId);
@@ -152,9 +231,11 @@ class MessageSenderWorker {
         });
 
         console.log(`✅ Message ${messageId} sent to contact ${contactId} via channel ${channelId}`);
+        console.log(`🏁 [END] Processing message ${messageId} - SUCCESS\n`);
       } catch (error) {
         console.error(`❌ Error processing message ${messageId}:`, error.message);
         console.error('Error stack:', error.stack);
+        console.log(`🏁 [END] Processing message ${messageId} - FAILED\n`);
         // Remove from processed set to allow retry
         this.processedMessages.delete(messageId);
       }
@@ -168,72 +249,56 @@ class MessageSenderWorker {
    */
   async sendMessageViaChannel({ message, contact, channel, service }) {
     try {
+      console.log(`📤 [SEND START] Sending message via ${channel.type} channel`);
+      
       const messageContent = message.content || '';
       const messageType = message.type || 'text';
+      const mappedType = this.mapMessageType(messageType);
 
-      // Create WhatsappClient instance
-      const client = new WhatsappClient({
-        url: service.apiUrl,
-        instanceId: channel.instanceId,
-        token: channel.token,
-      });
+      console.log(`📝 Message details:`, JSON.stringify({
+        type: messageType,
+        mappedType,
+        contentLength: messageContent.length,
+        contentPreview: messageContent.substring(0, 100) + (messageContent.length > 100 ? '...' : ''),
+      }, null, 2));
 
-      // Prepare message parameters
-      const messageParams = {
-        phone: contact.phone,
-        message: messageContent,
-        type: this.mapMessageType(messageType),
-        messageId: message.messageId || message._id, // For tracking
-      };
+      // Create WhatsAppApiClient instance
+      const client = new WhatsAppApiClient(channel.instanceId, channel.token);
 
-      // Add media URL if present
-      if (message.meta?.url) {
-        messageParams.mediaUrl = message.meta.url;
+      // Normalize phone number (remove + and spaces)
+      const phone = contact.phone.replace(/[+\s]/g, '');
+      console.log(`📱 Phone: ${contact.phone} -> ${phone}`);
+
+      let result;
+
+      // Send text message or file based on message type
+      if (mappedType === 'text') {
+        // Send text message
+        console.log(`📤 Sending text message to ${phone}...`);
+        result = await client.sendMessage(phone, messageContent);
+      } else {
+        // Send file/media message
+        // Note: sendFile currently only accepts phone and text
+        // filename and caption are hardcoded as empty strings in the client
+        // If needed, the client should be updated to accept these parameters
+        console.log(`📤 Sending file/media message to ${phone}...`);
+        result = await client.sendFile(phone, messageContent);
       }
 
-      // Add filename for file messages (extract from URL or use default)
-      if (messageParams.mediaUrl && messageType !== 'text') {
-        // Try to extract filename from URL
-        try {
-          const url = new URL(messageParams.mediaUrl);
-          const pathname = url.pathname;
-          const filenameFromUrl = pathname.split('/').pop();
-          if (filenameFromUrl && filenameFromUrl.includes('.')) {
-            messageParams.filename = filenameFromUrl;
-          } else {
-            // Default filename based on message type
-            const extension = this.getFileExtension(messageType);
-            messageParams.filename = `file.${extension}`;
-          }
-        } catch (e) {
-          // If URL parsing fails, use default filename
-          const extension = this.getFileExtension(messageType);
-          messageParams.filename = `file.${extension}`;
-        }
-      }
-
-      // Add caption if message has content and is a media message
-      if (messageParams.mediaUrl && messageContent) {
-        messageParams.caption = messageContent;
-      }
-
-      // Send message via client
-      const result = await client.sendMessage(messageParams);
-
-      console.log(`📤 Message sent via ${channel.type} channel:`, {
+      console.log(`📤 [SEND END] Message sent via ${channel.type} channel:`, JSON.stringify({
         contactId: contact.contactId,
         channelId: channel.channelId,
         serviceUrl: service.apiUrl,
-        success: result.success,
-        status: result.status,
-      });
+        messageType: mappedType,
+        result,
+      }, null, 2));
 
       return result;
     } catch (error) {
-      console.error(`❌ Failed to send message via channel ${channel.channelId}:`, {
+      console.error(`❌ [SEND END] Failed to send message via channel ${channel.channelId}:`, {
         error: error.message || error.error,
-        response: error.data,
-        status: error.status,
+        response: error.response?.data || error.data,
+        status: error.response?.status || error.status,
       });
       throw error;
     }
