@@ -373,14 +373,14 @@ function setupWebSocketListeners() {
   websocket.on('connected', handleReconnect)
 }
 
-function handleChat3Update(update: any) {
+async function handleChat3Update(update: any) {
   console.log('🔄 Processing Chat3 Update:', update.eventType, update.data)
   
   // Handle different update types from RabbitMQ
   switch (update.eventType) {
     case 'message.create':
       // New message - add to store
-      handleNewMessage(update.data)
+      await handleNewMessage(update.data)
       break
     
     case 'message.update':
@@ -418,7 +418,7 @@ function handleChat3Update(update: any) {
   }
 }
 
-function handleNewMessage(message: any) {
+async function handleNewMessage(message: any) {
   // Extract dialogId (can be string or object with _id/id)
   const messageDialogId = typeof message.dialogId === 'object' 
     ? (message.dialogId._id || message.dialogId.id) 
@@ -452,7 +452,7 @@ function handleNewMessage(message: any) {
   } else if (isFromOtherUser) {
     // Increment unread count if message is from another user and not in current dialog
     console.log('🔢 Incrementing unread count for dialog:', messageDialogId)
-    dialogsStore.incrementUnreadCount(messageDialogId)
+    await dialogsStore.incrementUnreadCount(messageDialogId)
   }
 
   // Update dialog last message

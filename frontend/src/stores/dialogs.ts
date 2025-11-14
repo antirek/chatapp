@@ -18,7 +18,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
   const searchResults = ref<Dialog[]>([])
   const searchPagination = ref<PaginatedResponse<Dialog>['pagination'] | null>(null)
   const searchSequence = ref(0)
-  const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'>('all')
+  const currentFilter = ref<'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'>('all')
 
   const hasMoreDialogs = computed(() => {
     if (!pagination.value) {
@@ -44,7 +44,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     includeLastMessage?: boolean
     append?: boolean
     retries?: number
-    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
+    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
   }
 
   async function fetchDialogs(params?: FetchDialogsParams) {
@@ -52,7 +52,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
     const limit = params?.limit ?? pagination.value?.limit ?? 50
     const includeLastMessage = params?.includeLastMessage ?? true
     const append = params?.append ?? page > 1
-    let filterForRequest: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' = currentFilter.value
+    let filterForRequest: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread' = currentFilter.value
 
     if (params?.type !== undefined) {
       filterForRequest = params.type
@@ -246,10 +246,39 @@ export const useDialogsStore = defineStore('dialogs', () => {
     }
   }
 
-  function incrementUnreadCount(dialogId: string) {
-    const dialog = dialogs.value.find(d => d.dialogId === dialogId)
-    if (dialog) {
-      dialog.unreadCount = (dialog.unreadCount || 0) + 1
+  async function incrementUnreadCount(dialogId: string) {
+    let dialog = dialogs.value.find(d => d.dialogId === dialogId)
+
+    if (!dialog) {
+      // When the unread filter is active we only store dialogs that were unread at fetch time.
+      // If a new message arrives in a dialog that wasn't previously unread, fetch it on-demand
+      // so it appears in the filtered list immediately.
+      if (currentFilter.value === 'unread') {
+        try {
+          const response = await api.getDialog(dialogId)
+          if (response.data) {
+            const normalizedDialog = normalizeDialog(response.data as Dialog)
+            normalizedDialog.unreadCount = 0
+
+            dialogs.value.unshift(normalizedDialog)
+            dialog = normalizedDialog
+          }
+        } catch (error) {
+          console.error('Failed to fetch dialog for unread increment:', error)
+          return
+        }
+      } else {
+        return
+      }
+    }
+
+    dialog.unreadCount = (dialog.unreadCount || 0) + 1
+
+    // Move dialog to top to reflect latest activity when we're showing unread items
+    const index = dialogs.value.indexOf(dialog)
+    if (index > 0) {
+      dialogs.value.splice(index, 1)
+      dialogs.value.unshift(dialog)
     }
   }
 
@@ -306,7 +335,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
   async function searchDialogs(search: string, options?: {
     page?: number
     limit?: number
-    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
+    type?: 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
     append?: boolean
   }) {
     const trimmed = search?.trim() || ''
