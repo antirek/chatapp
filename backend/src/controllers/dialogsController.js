@@ -946,6 +946,60 @@ export async function sendTypingIndicator(req, res) {
   }
 }
 
+export async function markDialogAsRead(req, res) {
+  try {
+    const { dialogId } = req.params;
+    const currentUserId = req.user?.userId;
+
+    if (!dialogId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dialog ID is required',
+      });
+    }
+
+    if (!currentUserId) {
+      return res.status(401).json({
+        success: false,
+        error: 'User authentication required',
+      });
+    }
+
+    const requestedUnread = Number(req.body?.unreadCount);
+    const payload = {
+      unreadCount:
+        Number.isFinite(requestedUnread) && requestedUnread >= 0 ? requestedUnread : 0,
+      lastSeenAt: req.body?.lastSeenAt || Date.now(),
+    };
+
+    if (req.body?.reason) {
+      payload.reason = req.body.reason;
+    }
+
+    const response = await Chat3Client.updateDialogMemberUnread(
+      dialogId,
+      currentUserId,
+      payload,
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        dialogId,
+        unreadCount: payload.unreadCount,
+        response,
+      },
+    });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to mark dialog as read',
+      details: error.response?.data,
+    });
+  }
+}
+
 export async function toggleDialogFavorite(req, res) {
   try {
     const { dialogId } = req.params;

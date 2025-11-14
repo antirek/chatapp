@@ -11,6 +11,7 @@ import {
   addDialogMember,
   removeDialogMember,
   sendTypingIndicator,
+  markDialogAsRead,
   toggleDialogFavorite,
 } from '../controllers/dialogsController.js';
 
@@ -124,6 +125,44 @@ router.get('/public', getPublicDialogs);
  *         description: Invalid dialog ID
  */
 router.post('/:dialogId/typing', sendTypingIndicator);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/unread:
+ *   patch:
+ *     tags: [Dialogs]
+ *     summary: Reset unread counter for current user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               unreadCount:
+ *                 type: integer
+ *                 description: Desired unread counter value (defaults to 0)
+ *               lastSeenAt:
+ *                 type: number
+ *                 description: Timestamp in ms (defaults to now)
+ *               reason:
+ *                 type: string
+ *                 description: Optional audit reason
+ *     responses:
+ *       '200':
+ *         description: Unread counter updated
+ *       '400':
+ *         description: Validation error
+ */
+router.patch('/:dialogId/unread', markDialogAsRead);
 
 /**
  * @openapi

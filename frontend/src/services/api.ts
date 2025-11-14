@@ -164,6 +164,11 @@ class ApiService {
     return data
   }
 
+  async markDialogAsRead(dialogId: string, payload?: { unreadCount?: number; lastSeenAt?: number; reason?: string }): Promise<ApiResponse<{ unreadCount: number }>> {
+    const { data } = await this.api.patch(`/dialogs/${dialogId}/unread`, payload)
+    return data
+  }
+
   // ==================== MESSAGES ====================
 
   async getMessages(dialogId: string, params?: {

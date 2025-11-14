@@ -142,6 +142,17 @@ class Chat3Client {
     return response.data;
   }
 
+  /**
+   * Update unread counter for dialog member
+   */
+  async updateDialogMemberUnread(dialogId, userId, data = {}) {
+    const response = await this.client.patch(
+      `/dialogs/${dialogId}/members/${userId}/unread`,
+      data,
+    );
+    return response.data;
+  }
+
   // ==================== MESSAGE STATUS ====================
 
   /**

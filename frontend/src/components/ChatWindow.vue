@@ -10,6 +10,31 @@
       </div>
       
       <div class="flex items-center gap-2">
+        <!-- Mark All Read Button (desktop) -->
+        <button
+          @click="handleMarkDialogAsRead"
+          :disabled="isMarkingRead"
+          class="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors"
+          :class="isMarkingRead ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100' : 'bg-white text-gray-600 hover:bg-gray-100 border-gray-200'"
+          title="Отметить все сообщения прочитанными"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+          <span>Отметить прочитанным</span>
+        </button>
+        <!-- Compact button on mobile -->
+        <button
+          @click="handleMarkDialogAsRead"
+          :disabled="isMarkingRead"
+          class="sm:hidden p-2 rounded-lg border text-gray-600 hover:bg-gray-100 transition-colors"
+          :class="isMarkingRead ? 'text-gray-300 cursor-not-allowed border-gray-100' : 'border-gray-200'"
+          title="Отметить все сообщения прочитанными"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </button>
         <!-- Favorite Button -->
         <button
           @click="toggleFavorite"
@@ -301,6 +326,7 @@ const messagesContainer = ref<HTMLElement>()
 
 const isDialogInfoOpen = ref(false)
 const isAddMembersOpen = ref(false)
+const isMarkingRead = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
 const existingMemberIds = ref<string[]>([])
@@ -399,6 +425,22 @@ async function loadCurrentUserAvatar() {
     // Cache null on error
     userAvatars.value[authStore.user.userId] = null
     console.error('Failed to load current user avatar:', error)
+  }
+}
+
+async function handleMarkDialogAsRead() {
+  if (!props.dialog?.dialogId || isMarkingRead.value) {
+    return
+  }
+
+  isMarkingRead.value = true
+  try {
+    await api.markDialogAsRead(props.dialog.dialogId)
+    dialogsStore.updateDialogUnreadCount(props.dialog.dialogId, 0)
+  } catch (error) {
+    console.error('Failed to mark dialog as read:', error)
+  } finally {
+    isMarkingRead.value = false
   }
 }
 
