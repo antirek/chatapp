@@ -1,5 +1,6 @@
 import Chat3Client from '../services/Chat3Client.js';
 import User from '../models/User.js';
+import Contact from '../models/Contact.js';
 
 function getMetaValue(meta, key) {
   if (!meta || !key) {
@@ -43,6 +44,44 @@ function resolveUserAvatar(user) {
 }
 
 export async function getP2PUserProfile(userId) {
+  // Skip API request for business contacts (cnt_...) - they are not users
+  // Business contacts are loaded from Contact model, not User model
+  if (userId && userId.startsWith('cnt_')) {
+    try {
+      const contact = await Contact.findOne({ contactId: userId }).lean().exec();
+
+      if (contact) {
+        const meta = {
+          displayName: contact.name,
+          fullName: contact.name,
+          phone: contact.phone,
+          contactType: 'business',
+        };
+
+        return {
+          userId: contact.contactId,
+          name: contact.name,
+          phone: contact.phone,
+          meta,
+        };
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to load contact ${userId}:`, error.message);
+    }
+
+    // Fallback if contact not found
+    return {
+      userId,
+      name: userId,
+      phone: null,
+      meta: {
+        displayName: userId,
+        fullName: userId,
+        contactType: 'business',
+      },
+    };
+  }
+
   try {
     const response = await Chat3Client.getUser(userId);
     return response.data || response;
