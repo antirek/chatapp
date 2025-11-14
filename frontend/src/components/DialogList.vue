@@ -273,14 +273,16 @@ const { isSearching, isLoadingMoreSearch, searchError, searchResults, lastSearch
 
 const searchTerm = ref(lastSearchTerm.value || '')
 const MIN_SEARCH_LENGTH = 2
-type FilterOptionValue = 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites'
+type FilterOptionValue = 'all' | 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
 
 const filterOptions: Array<{ label: string; value: FilterOptionValue; icon?: string }> = [
   { label: 'Все', value: 'all' },
   { label: 'Личные', value: 'p2p', icon: '👥' },
+  { label: 'Бизнес контакты', value: 'business-contacts', icon: '💼' },
   { label: 'Приватные группы', value: 'group:private', icon: '🔒' },
   { label: 'Публичные группы', value: 'group:public', icon: '🌐' },
-  { label: 'Мои избранные', value: 'favorites', icon: '⭐' }
+  { label: 'Мои избранные', value: 'favorites', icon: '⭐' },
+  { label: 'Непрочитанные', value: 'unread', icon: '🔔' }
 ]
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const scrollContainer = ref<HTMLElement | null>(null)

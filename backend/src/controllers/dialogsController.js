@@ -262,6 +262,8 @@ export async function getDialogs(req, res) {
     // Type filter
     if (requestedType === 'p2p') {
       filterParts.push('(meta.type,eq,p2p)');
+    } else if (requestedType === 'business-contacts') {
+      filterParts.push('(meta.type,eq,personal_contact)');
     } else if (requestedType === 'group:public') {
       filterParts.push('(meta.type,eq,group)&(meta.groupType,eq,public)');
     } else if (requestedType === 'group:private') {
@@ -269,6 +271,9 @@ export async function getDialogs(req, res) {
     } else if (requestedType === 'favorites') {
       const favoriteKey = `favoriteFor${currentUserId}`;
       filterParts.push(`(meta.${favoriteKey},eq,true)`);
+    } else if (requestedType === 'unread') {
+      filterParts.push('(unreadCount,gte,1)');
+      params.sort = params.sort || '(unreadCount,desc)';
     }
 
     // Search filter
@@ -280,6 +285,9 @@ export async function getDialogs(req, res) {
       if (requestedType === 'p2p') {
         // Search only in P2P dialogs by personalized name
         filterParts.push(`(meta.${nameMetaKey},regex,"${pattern}")`);
+      } else if (requestedType === 'business-contacts') {
+        // Search in business contacts by dialog name (contact name)
+        filterParts.push(`(name,regex,"${pattern}")`);
       } else if (requestedType === 'group:public' || requestedType === 'group:private') {
         // Search only in groups by name
         filterParts.push(`(name,regex,"${pattern}")`);

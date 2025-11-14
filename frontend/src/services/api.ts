@@ -68,7 +68,7 @@ class ApiService {
     page?: number
     limit?: number
     includeLastMessage?: boolean
-    type?: 'p2p' | 'group:private' | 'group:public' | 'all' | 'favorites'
+    type?: 'p2p' | 'group:private' | 'group:public' | 'all' | 'favorites' | 'business-contacts' | 'unread'
     search?: string
   }): Promise<PaginatedResponse<Dialog>> {
     const queryParams = { ...params }

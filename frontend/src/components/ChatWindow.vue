@@ -842,6 +842,13 @@ async function loadOtherUserInfo() {
           userAvatars.value[otherMember.userId] = otherUser.value.avatar
         }
 
+        // Skip API request for business contacts (cnt_...) - they are not users
+        // Business contacts are loaded from Contact model, not User model
+        if (otherMember.userId && otherMember.userId.startsWith('cnt_')) {
+          // This is a business contact, not a user - skip getUser request
+          return
+        }
+
         try {
           const userResponse = await api.getUser(otherMember.userId)
           if (userResponse.success && userResponse.data) {
