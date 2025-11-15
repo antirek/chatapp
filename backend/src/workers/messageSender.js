@@ -3,6 +3,7 @@ import Service from '../models/Service.js';
 import Contact from '../models/Contact.js';
 import Chat3Client from '../services/Chat3Client.js';
 import { WhatsAppApiClient } from '../services/whatsapp-api-client.js';
+import { normalizeChat3Update } from '../utils/updateNormalizer.js';
 
 /**
  * Message Sender Worker
@@ -32,31 +33,35 @@ class MessageSenderWorker {
    * Called when a new message is created
    */
   async processMessage(update) {
+    const normalizedUpdate = normalizeChat3Update(update);
+    const envelope = normalizedUpdate?.data || {};
+    const eventType = normalizedUpdate?.eventType;
+
     try {
       // Log received update data
       console.log('📥 Received update:', JSON.stringify({
-        eventType: update.eventType,
-        entityId: update.entityId,
-        userId: update.userId,
-        dataKeys: update.data ? Object.keys(update.data) : [],
-        dialogId: update.dialogId,
-        hasDialog: !!update.dialog,
+        eventType,
+        entityId: normalizedUpdate.entityId,
+        userId: normalizedUpdate.userId,
+        includedSections: envelope?.context?.includedSections,
+        dialogId: normalizedUpdate.dialogId,
+        hasDialog: !!envelope.dialog,
       }, null, 2));
 
       // Check if update is for a business contact (cnt_...)
       // Only process updates intended for business contacts, not for regular users (usr_...)
-      if (!update.userId || !update.userId.startsWith('cnt_')) {
-        console.log(`⏭️  Update is not for a business contact (userId: ${update.userId || 'missing'})`);
+      if (!normalizedUpdate.userId || !normalizedUpdate.userId.startsWith('cnt_')) {
+        console.log(`⏭️  Update is not for a business contact (userId: ${normalizedUpdate.userId || 'missing'})`);
         return;
       }
 
       // Only process message.create events
-      if (update.eventType !== 'message.create') {
-        console.log(`⏭️  Skipping event type: ${update.eventType}`);
+      if (eventType !== 'message.create') {
+        console.log(`⏭️  Skipping event type: ${eventType}`);
         return;
       }
 
-      const message = update.data;
+      const message = envelope.message;
       if (!message) {
         console.log('⏭️  No message data in update');
         return;
@@ -94,7 +99,11 @@ class MessageSenderWorker {
       }, null, 2));
 
       // Get dialog to verify it's a business contact dialog
-      const dialogId = message.dialogId || update.dialogId || update.entityId;
+      const dialogId =
+        message.dialogId ||
+        normalizedUpdate.dialogId ||
+        envelope.context?.dialogId ||
+        normalizedUpdate.entityId;
       if (!dialogId) {
         console.log(`⏭️  No dialogId found for message ${messageId}`);
         console.log(`🏁 [END] Processing message ${messageId} - SKIPPED (no dialogId)`);
@@ -103,9 +112,8 @@ class MessageSenderWorker {
 
       console.log(`📂 Dialog ID: ${dialogId}`);
 
-      // Try to get dialog data from update first (if available)
-      // Chat3 may include dialog data in update.dialog or update.data.dialog
-      let dialogData = update.dialog || update.data?.dialog || null;
+      // Try to get dialog data from the envelope first (if available)
+      let dialogData = envelope.dialog || null;
       let dialogType = null;
       let contactId = null;
 

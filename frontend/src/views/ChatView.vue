@@ -315,6 +315,16 @@ async function handleReconnect() {
   }
 }
 
+const handleMessageUpdateEvent = (update: any) => {
+  const eventType = resolveEventType(update)
+  if (!eventType) {
+    console.warn('⚠️  Received message:update without eventType', update)
+    return
+  }
+  const envelope = update?.data || {}
+  handleMessageUpdate(eventType, envelope)
+}
+
 const handleTypingUpdate = (event: any) => {
   console.log('✍️ Typing update received:', event)
   const dialogId =
@@ -355,7 +365,7 @@ const handleTypingUpdate = (event: any) => {
 onUnmounted(() => {
   // Clean up WebSocket listeners
   websocket.off('chat3:update', handleChat3Update)
-  websocket.off('message:update', handleMessageUpdate)
+  websocket.off('message:update', handleMessageUpdateEvent)
   websocket.off('dialog:update', handleDialogUpdate)
   websocket.off('typing:update', handleTypingUpdate)
   websocket.off('connected', handleReconnect)
@@ -367,62 +377,125 @@ onUnmounted(() => {
 function setupWebSocketListeners() {
   // ✅ RabbitMQ Chat3 Updates
   websocket.on('chat3:update', handleChat3Update)
-  websocket.on('message:update', handleMessageUpdate)
+  websocket.on('message:update', handleMessageUpdateEvent)
   websocket.on('dialog:update', handleDialogUpdate)
   websocket.on('typing:update', handleTypingUpdate)
   websocket.on('connected', handleReconnect)
 }
 
+function buildTypingEventFromEnvelope(envelope: any, fallbackDialogId?: string) {
+  const typingPayload = envelope?.typing
+  if (!typingPayload) {
+    return null
+  }
+
+  const dialogId =
+    fallbackDialogId ||
+    typingPayload.dialogId ||
+    envelope?.context?.dialogId ||
+    envelope?.dialog?.dialogId
+
+  if (!dialogId) {
+    return null
+  }
+
+  return {
+    dialogId,
+    userId: typingPayload.userId || typingPayload.userInfo?.userId,
+    userName: typingPayload.userInfo?.name,
+    userInfo: typingPayload.userInfo,
+    expiresInMs: typingPayload.expiresInMs ?? envelope?.context?.expiresInMs ?? 5000
+  }
+}
+
+function syncMemberStateFromEnvelope(envelope: any, dialogId?: string) {
+  if (!dialogId) {
+    return
+  }
+
+  const targetDialog = dialogsStore.dialogs.find(d => d.dialogId === dialogId)
+  if (!targetDialog) {
+    return
+  }
+
+  const unreadCount = envelope?.member?.state?.unreadCount
+  if (typeof unreadCount === 'number') {
+    dialogsStore.updateDialogUnreadCount(dialogId, unreadCount)
+  }
+}
+
+function resolveEventType(update: any): string | undefined {
+  return update?.eventType || update?.data?.context?.eventType
+}
+
+function deriveDialogId(update: any, envelope: any): string | undefined {
+  return (
+    update?.dialogId ||
+    envelope?.context?.dialogId ||
+    envelope?.dialog?.dialogId ||
+    envelope?.message?.dialogId ||
+    envelope?.typing?.dialogId
+  )
+}
+
 async function handleChat3Update(update: any) {
-  console.log('🔄 Processing Chat3 Update:', update.eventType, update.data)
+  const eventType = resolveEventType(update)
+  const envelope = update?.data || {}
+  const dialogId = deriveDialogId(update, envelope)
+
+  console.log('🔄 Processing Chat3 Update:', eventType, envelope)
   
-  // Handle different update types from RabbitMQ
-  switch (update.eventType) {
+  if (!eventType) {
+    console.warn('⚠️  Cannot resolve event type for update:', update)
+    return
+  }
+
+  switch (eventType) {
     case 'message.create':
-      // New message - add to store
-      await handleNewMessage(update.data)
+      if (envelope.message) {
+        await handleNewMessage(envelope.message, envelope, dialogId)
+      } else {
+        console.warn('⚠️  message.create received without message payload:', update)
+      }
       break
     
     case 'message.update':
+    case 'message.delete':
     case 'message.status.update':
-      // Message updated (status, reactions, etc.)
-      handleMessageUpdate(update)
+    case 'message.reaction.add':
+    case 'message.reaction.remove':
+      handleMessageUpdate(eventType, envelope)
       break
     
     case 'dialog.create':
     case 'dialog.update':
     case 'dialog.member.add':
     case 'dialog.member.remove':
-      // Dialog created, updated, or members changed - refresh dialogs list
+    case 'dialog.member.update':
       handleDialogUpdate(update)
       break
 
-    case 'dialog.typing':
-      {
-        const typingPayload = update.data?.typing || {}
-        handleTypingUpdate({
-          dialogId: update.dialogId || update.data?.dialogId,
-          userId: typingPayload.userId || update.data?.userId,
-          userName: typingPayload.userInfo?.name || update.data?.userName,
-          userInfo: typingPayload.userInfo,
-          expiresInMs:
-            typingPayload.expiresInMs ||
-            update.data?.expiresInMs ||
-            update.data?.expiresIn
-        })
+    case 'dialog.typing': {
+      const typingEvent = buildTypingEventFromEnvelope(envelope, dialogId)
+      if (typingEvent) {
+        handleTypingUpdate(typingEvent)
       }
       break
+    }
     
     default:
-      console.log('⚠️  Unknown update type:', update.eventType)
+      console.log('⚠️  Unknown update type:', eventType)
   }
+
+  syncMemberStateFromEnvelope(envelope, dialogId)
 }
 
-async function handleNewMessage(message: any) {
+async function handleNewMessage(message: any, envelope?: any, fallbackDialogId?: string) {
   // Extract dialogId (can be string or object with _id/id)
   const messageDialogId = typeof message.dialogId === 'object' 
     ? (message.dialogId._id || message.dialogId.id) 
     : message.dialogId
+  const resolvedDialogId = messageDialogId || fallbackDialogId
   
   const currentDialogId = dialogsStore.currentDialog?.dialogId
   
@@ -447,31 +520,32 @@ async function handleNewMessage(message: any) {
   }
   
   // Add to messages store if in current dialog
-  if (messageDialogId === currentDialogId) {
+  if (resolvedDialogId && resolvedDialogId === currentDialogId) {
     messagesStore.addMessage(message)
-  } else if (isFromOtherUser) {
-    // Increment unread count if message is from another user and not in current dialog
-    console.log('🔢 Incrementing unread count for dialog:', messageDialogId)
-    await dialogsStore.incrementUnreadCount(messageDialogId)
+  } else if (isFromOtherUser && resolvedDialogId) {
+    const unreadFromUpdate = envelope?.member?.state?.unreadCount
+    if (typeof unreadFromUpdate === 'number') {
+      dialogsStore.updateDialogUnreadCount(resolvedDialogId, unreadFromUpdate)
+    } else {
+      console.log('🔢 Incrementing unread count for dialog:', resolvedDialogId)
+      await dialogsStore.incrementUnreadCount(resolvedDialogId)
+    }
   }
 
   // Update dialog last message
-  dialogsStore.updateLastMessage(messageDialogId, message)
+  if (resolvedDialogId) {
+    dialogsStore.updateLastMessage(resolvedDialogId, message)
+  }
 }
 
-async function handleMessageUpdate(update: any) {
+function handleMessageUpdate(eventType: string, envelope: any) {
   // Handle message updates (reactions, status, etc.)
-  console.log('📝 handleMessageUpdate called:', update)
-  if (!update?.data) {
-    return
-  }
-
-  const payload = update.data
-  const payloadMessage = payload.message || payload
-  const messageId = payload.messageId || payload._id || payloadMessage?.messageId || payloadMessage?._id
+  console.log('📝 handleMessageUpdate called:', eventType, envelope)
+  const payload = envelope?.message || envelope
+  const messageId = payload?.messageId || payload?._id
 
   if (!messageId) {
-    console.warn('⚠️ handleMessageUpdate: messageId is missing in payload', update)
+    console.warn('⚠️ handleMessageUpdate: messageId is missing in payload', envelope)
     return
   }
 
@@ -479,23 +553,37 @@ async function handleMessageUpdate(update: any) {
     (m) => m.messageId === messageId || m._id === messageId
   )
 
-  if (update.eventType === 'message.status.update') {
-    const normalizedMessage = payloadMessage
-    if (!normalizedMessage) {
-      console.warn('⚠️ handleMessageUpdate: message payload is empty for status update', update)
+  if (eventType === 'message.status.update') {
+    const statusUpdate = payload?.statusUpdate || payload
+    if (!statusUpdate?.userId || !statusUpdate?.status) {
+      console.warn('⚠️ handleMessageUpdate: statusUpdate payload missing fields', envelope)
       return
     }
 
-    messagesStore.updateMessage(messageId, normalizedMessage)
+    const previousStatus = existingMessage?.statuses?.find(
+      (s: any) => s.userId === statusUpdate.userId
+    )?.status
+
+    messagesStore.updateMessage(messageId, {
+      messageId,
+      userId: statusUpdate.userId,
+      status: statusUpdate.status,
+      updatedAt: statusUpdate.updatedAt || statusUpdate.timestamp,
+      createdAt: statusUpdate.createdAt
+    })
 
     const currentUserId = authStore.user?.userId
-    const updatedDialogId = normalizedMessage.dialogId
+    const updatedDialogId =
+      existingMessage?.dialogId ||
+      payload?.dialogId ||
+      envelope?.context?.dialogId
 
     if (currentUserId && updatedDialogId) {
-      const previousStatus = existingMessage?.statuses?.find((s: any) => s.userId === currentUserId)?.status
-      const updatedStatus = normalizedMessage.statuses?.find((s: any) => s.userId === currentUserId)?.status
-
-      if (previousStatus !== 'read' && updatedStatus === 'read') {
+      if (
+        statusUpdate.userId === currentUserId &&
+        previousStatus !== 'read' &&
+        statusUpdate.status === 'read'
+      ) {
         if (updatedDialogId !== dialogsStore.currentDialog?.dialogId) {
           const dialog = dialogsStore.dialogs.find((d) => d.dialogId === updatedDialogId)
           if (dialog && dialog.unreadCount > 0) {
@@ -504,9 +592,11 @@ async function handleMessageUpdate(update: any) {
         }
       }
     }
+
+    return
   } else {
-    console.log('📝 Updating message with payload:', payloadMessage)
-    messagesStore.updateMessage(messageId, payloadMessage)
+    console.log('📝 Updating message with payload:', payload)
+    messagesStore.updateMessage(messageId, payload)
   }
 }
 

@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import AuthService from '../services/AuthService.js';
 import rabbitmqConsumer from '../services/rabbitmqConsumer.js';
+import { normalizeChat3Update } from '../utils/updateNormalizer.js';
 
 /**
  * Initialize WebSocket server
@@ -53,74 +54,29 @@ export async function initializeWebSocket(server) {
     // ✅ Create RabbitMQ queue for user and subscribe to updates
     try {
       await rabbitmqConsumer.createUserQueue(socket.userId, async (update) => {
-        console.log(`➡️  Sending update to ${socket.userId}:`, update.eventType);
+        const normalizedUpdate = normalizeChat3Update(update);
+        const eventType = normalizedUpdate.eventType || normalizedUpdate.data?.context?.eventType;
+        const envelope = normalizedUpdate.data || {};
+
+        console.log(`➡️  Sending update to ${socket.userId}:`, eventType);
         
-        // Forward raw update to client
-        socket.emit('chat3:update', update);
+        // Forward normalized update to client
+        socket.emit('chat3:update', normalizedUpdate);
         
         // Also emit specific event based on eventType for compatibility
-        if (update.eventType === 'message.create') {
-          socket.emit('message:new', update.data);
-        } else if (update.eventType.startsWith('message.')) {
-          socket.emit('message:update', update);
-        } else if (update.eventType === 'dialog.typing') {
-          const typingPayload = update.data?.typing || {};
-          const embeddedUserInfo =
-            typingPayload.userInfo ||
-            update.data?.userInfo ||
-            null;
-
-          const targetUserId =
-            typingPayload.userId ||
-            embeddedUserInfo?.userId ||
-            update.data?.userId ||
-            update.userId;
-
-          const dialogId =
-            update.data?.dialogId ||
-            typingPayload.dialogId ||
-            update.dialogId ||
-            update.entityId;
-
-          const expiresInMs =
-            typingPayload.expiresInMs ??
-            update.data?.expiresInMs ??
-            update.data?.expiresIn ??
-            update.data?.ttl ??
-            5000;
-
-          const userName =
-            embeddedUserInfo?.name ||
-            update.data?.userName ||
-            update.userName ||
-            update.data?.name ||
-            null;
-
-          console.log(
-            `✍️  Typing update for dialog ${dialogId}:`,
-            targetUserId,
-          );
-
-          const sanitizedUserInfo = embeddedUserInfo
-            ? {
-                userId: embeddedUserInfo.userId,
-                name: embeddedUserInfo.name,
-                avatar:
-                  embeddedUserInfo.avatar ||
-                  embeddedUserInfo.meta?.avatar ||
-                  null,
-              }
-            : undefined;
-
-          socket.emit('typing:update', {
-            dialogId,
-            userId: targetUserId,
-            userName: userName || undefined,
-            userInfo: sanitizedUserInfo,
-            expiresInMs,
-          });
-        } else if (update.eventType.startsWith('dialog.')) {
-          socket.emit('dialog:update', update);
+        if (eventType === 'message.create') {
+          if (envelope.message) {
+            socket.emit('message:new', envelope.message);
+          }
+        } else if (eventType?.startsWith('message.')) {
+          socket.emit('message:update', normalizedUpdate);
+        } else if (eventType === 'dialog.typing') {
+          const typingUpdate = buildTypingEvent(normalizedUpdate);
+          if (typingUpdate) {
+            socket.emit('typing:update', typingUpdate);
+          }
+        } else if (eventType?.startsWith('dialog.')) {
+          socket.emit('dialog:update', normalizedUpdate);
         }
       });
     } catch (error) {
@@ -181,4 +137,51 @@ export async function initializeWebSocket(server) {
 
   return io;
 }
+
+function buildTypingEvent(update) {
+  if (!update || typeof update !== 'object') {
+    return null;
+  }
+
+  const envelope = update.data || {};
+  const typingPayload = envelope.typing;
+
+  if (!typingPayload) {
+    return null;
+  }
+
+  const dialogId =
+    update.dialogId ||
+    envelope.context?.dialogId ||
+    envelope.dialog?.dialogId ||
+    typingPayload.dialogId ||
+    update.entityId ||
+    null;
+
+  if (!dialogId) {
+    return null;
+  }
+
+  const embeddedUserInfo = typingPayload.userInfo || null;
+  const targetUserId = typingPayload.userId || embeddedUserInfo?.userId;
+
+  if (!targetUserId) {
+    return null;
+  }
+
+  return {
+    dialogId,
+    userId: targetUserId,
+    userName: embeddedUserInfo?.name || undefined,
+    userInfo: embeddedUserInfo
+      ? {
+          userId: embeddedUserInfo.userId,
+          name: embeddedUserInfo.name,
+          avatar: embeddedUserInfo.avatar || embeddedUserInfo.meta?.avatar || null,
+        }
+      : undefined,
+    expiresInMs: typingPayload.expiresInMs ?? envelope.context?.expiresInMs ?? 5000,
+  };
+}
+
 
