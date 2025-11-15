@@ -105,10 +105,10 @@
         <div
           v-else
           class="flex mb-3 gap-2 group relative"
-          :class="isOwnMessage(message) ? 'justify-end' : 'justify-start'"
+          :class="shouldAlignRight(message) ? 'justify-end' : 'justify-start'"
         >
           <!-- Avatar (for other user's messages - left side) -->
-          <div v-if="!isOwnMessage(message)" class="flex-shrink-0">
+          <div v-if="!shouldAlignRight(message)" class="flex-shrink-0">
             <Avatar
               :avatar="getSenderAvatar(message)"
               :name="getSenderName(message)"
@@ -118,12 +118,12 @@
             />
           </div>
 
-          <div class="flex flex-col relative" :class="isOwnMessage(message) ? 'items-end' : 'items-start'">
+          <div class="flex flex-col relative" :class="shouldAlignRight(message) ? 'items-end' : 'items-start'">
             <!-- Sender Name -->
             <div class="text-xs mb-1 px-1"
-              :class="isOwnMessage(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
+              :class="shouldAlignRight(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
             >
-              {{ getSenderName(message) }}{{ isOwnMessage(message) ? ' (Вы)' : '' }}
+              {{ getSenderName(message) }}<span v-if="isOwnMessage(message)"> (Вы)</span>
             </div>
           
           <!-- Message Bubble -->
@@ -214,7 +214,7 @@
               v-if="!isOwnMessage(message) && !isMessageRead(message)"
               @click="markMessageAsRead(message)"
               class="text-xs mt-2 px-3 py-1 rounded-md transition-colors"
-              :class="isOwnMessage(message) 
+              :class="shouldAlignRight(message) 
                 ? 'bg-primary-500 hover:bg-primary-400 text-white' 
                 : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200'"
             >
@@ -235,7 +235,7 @@
         </div>
 
           <!-- Avatar (for own messages - right side) -->
-          <div v-if="isOwnMessage(message)" class="flex-shrink-0">
+          <div v-if="shouldAlignRight(message)" class="flex-shrink-0">
             <Avatar
               :avatar="getSenderAvatar(message)"
               :name="getSenderName(message)"
@@ -367,6 +367,11 @@ const isBusinessContact = computed(() => {
   const chatType = props.dialog.chatType || props.dialog.meta?.type
   return chatType === 'personal_contact'
 })
+const businessContactId = computed(() => (
+  props.dialog.meta?.contactId?.value ||
+  props.dialog.meta?.contactId ||
+  props.dialog.dialogId
+))
 const businessContactDisplayName = computed(() => {
   if (!isBusinessContact.value) {
     return null
@@ -437,15 +442,13 @@ watch(
 )
 
 watchEffect(() => {
-  if (isBusinessContact.value) {
-    const contactId =
-      props.dialog.meta?.contactId?.value ||
-      props.dialog.meta?.contactId ||
-      props.dialog.dialogId
-    const name = businessContactDisplayName.value
-    if (contactId && name) {
-      userNamesCache.value[contactId] = name
-    }
+  const contactId =
+    props.dialog.meta?.contactId?.value ||
+    props.dialog.meta?.contactId ||
+    props.dialog.dialogId
+  const name = businessContactDisplayName.value
+  if (contactId && name) {
+    userNamesCache.value[contactId] = name
   }
 })
 
@@ -568,19 +571,23 @@ function handleScroll(event: Event) {
 }
 
 function isOwnMessage(message: Message): boolean {
-  if (isBusinessContact.value) {
-    const contactId =
-      props.dialog.meta?.contactId?.value ||
-      props.dialog.meta?.contactId ||
-      props.dialog.dialogId
-    return (
-      contactId &&
-      message.senderId &&
-      !message.senderId.startsWith('cnt_')
-    )
-  }
-
   return message.senderId === authStore.user?.userId
+}
+
+function isBusinessMessage(message: Message): boolean {
+  const contactId = businessContactId.value
+  return (
+    isBusinessContact.value &&
+    !!contactId &&
+    message.senderId === contactId
+  )
+}
+
+function shouldAlignRight(message: Message): boolean {
+  if (isBusinessMessage(message)) {
+    return false
+  }
+  return true
 }
 
 function getNormalizedType(message: Message): string {
@@ -779,12 +786,7 @@ function resolveUserNameFromMessage(message: Message): string {
 
   void fetchUserName(message.senderId)
 
-  const fallback =
-    message.senderId === authStore.user?.userId
-      ? authStore.user?.name
-      : undefined
-
-  return fallback || `Пользователь ${message.senderId}`
+  return `Пользователь ${message.senderId}`
 }
 
 function getSenderAvatar(message: Message): string | null {
