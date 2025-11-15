@@ -85,6 +85,11 @@ import api from '@/services/api'
 import Avatar from './Avatar.vue'
 import { useAuthStore } from '@/stores/auth'
 
+const P2P_NAME_META_KEY = 'p2pDialogName'
+const P2P_AVATAR_META_KEY = 'p2pDialogAvatar'
+const LEGACY_P2P_NAME_PREFIX = 'p2pDialogNameFor'
+const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor'
+
 const props = defineProps<{
   dialog: Dialog
 }>()
@@ -156,10 +161,18 @@ async function loadUserInfo() {
     }
 
     // Если участников нет, используем данные из мета-тегов
-    const p2pNameKey = `p2pDialogNameFor${currentUserId}`
-    const p2pAvatarKey = `p2pDialogAvatarFor${currentUserId}`
-    const nameFromMeta = props.dialog.meta?.[p2pNameKey]?.value || props.dialog.meta?.[p2pNameKey]
-    const avatarFromMeta = props.dialog.meta?.[p2pAvatarKey]?.value ?? props.dialog.meta?.[p2pAvatarKey] ?? props.dialog.avatar
+    const nameFromMeta = getScopedMetaValue(
+      props.dialog.meta,
+      P2P_NAME_META_KEY,
+      LEGACY_P2P_NAME_PREFIX,
+      currentUserId
+    )
+    const avatarFromMeta = getScopedMetaValue(
+      props.dialog.meta,
+      P2P_AVATAR_META_KEY,
+      LEGACY_P2P_AVATAR_PREFIX,
+      currentUserId
+    ) ?? props.dialog.avatar
 
     if (nameFromMeta) {
       user.value = {
@@ -193,6 +206,28 @@ function formatPhone(phone: string): string {
   }
   
   return phone
+}
+
+function unwrapMetaValue(entry: any) {
+  if (entry == null) return undefined
+  if (typeof entry === 'object' && 'value' in entry) {
+    return entry.value
+  }
+  return entry
+}
+
+function getScopedMetaValue(
+  meta: Record<string, any> | undefined,
+  key: string,
+  legacyPrefix: string,
+  currentUserId: string
+) {
+  if (!meta) return undefined
+  const scoped = unwrapMetaValue(meta[key])
+  if (scoped !== undefined) {
+    return scoped
+  }
+  return unwrapMetaValue(meta[`${legacyPrefix}${currentUserId}`])
 }
 </script>
 

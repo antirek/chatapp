@@ -9,6 +9,12 @@ import Contact from '../models/Contact.js';
 // import { authenticate } from '../middleware/auth.js';
 
 const MIN_SEARCH_LENGTH = 2;
+const P2P_DIALOG_NAME_KEY = 'p2pDialogName';
+const P2P_DIALOG_AVATAR_KEY = 'p2pDialogAvatar';
+const LEGACY_P2P_NAME_PREFIX = 'p2pDialogNameFor';
+const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor';
+const FAVORITE_META_KEY = 'favorite';
+const LEGACY_FAVORITE_PREFIX = 'favoriteFor';
 
 function extractMetaValue(meta, key) {
   if (!meta || !key) {
@@ -29,6 +35,41 @@ function extractMetaValue(meta, key) {
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getScopedMetaValue(meta, key, currentUserId, legacyPrefix) {
+  const scopedValue = extractMetaValue(meta, key);
+  if (scopedValue !== undefined && scopedValue !== null) {
+    return scopedValue;
+  }
+
+  if (legacyPrefix && currentUserId) {
+    return extractMetaValue(meta, `${legacyPrefix}${currentUserId}`);
+  }
+
+  return undefined;
+}
+
+function resolveFavoriteState(metaResponse, currentUserId) {
+  if (!metaResponse) {
+    return undefined;
+  }
+
+  const containers = [metaResponse, metaResponse?.data];
+  for (const container of containers) {
+    const value = getScopedMetaValue(
+      container,
+      FAVORITE_META_KEY,
+      currentUserId,
+      LEGACY_FAVORITE_PREFIX,
+    );
+
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function createEmptyResult(page, limit) {
@@ -99,12 +140,9 @@ export async function resolveUserName(userId, fallbackName) {
 
 
 async function ensureP2PMeta(dialog, currentUserId) {
-  const nameKey = `p2pDialogNameFor${currentUserId}`;
-  const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
-
   const meta = dialog.meta || {};
-  let name = extractMetaValue(meta, nameKey);
-  let avatar = extractMetaValue(meta, avatarKey);
+  let name = getScopedMetaValue(meta, P2P_DIALOG_NAME_KEY, currentUserId, LEGACY_P2P_NAME_PREFIX);
+  let avatar = getScopedMetaValue(meta, P2P_DIALOG_AVATAR_KEY, currentUserId, LEGACY_P2P_AVATAR_PREFIX);
 
   if (name && avatar !== undefined) {
     return { name, avatar };
@@ -200,10 +238,18 @@ export async function processP2PDialog(dialog, currentUser) {
     dialog = await enrichBusinessContactDialog(dialog);
   }
 
-  const nameKey = `p2pDialogNameFor${currentUserId}`;
-  const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
-  const personalizedName = extractMetaValue(dialog.meta, nameKey);
-  const personalizedAvatar = extractMetaValue(dialog.meta, avatarKey);
+  const personalizedName = getScopedMetaValue(
+    dialog.meta,
+    P2P_DIALOG_NAME_KEY,
+    currentUserId,
+    LEGACY_P2P_NAME_PREFIX,
+  );
+  const personalizedAvatar = getScopedMetaValue(
+    dialog.meta,
+    P2P_DIALOG_AVATAR_KEY,
+    currentUserId,
+    LEGACY_P2P_AVATAR_PREFIX,
+  );
 
   if (personalizedName && personalizedAvatar !== undefined) {
     return {
@@ -314,8 +360,7 @@ export async function getDialogs(req, res) {
     } else if (requestedType === 'group:private') {
       filterParts.push('(meta.type,eq,group)&(meta.groupType,eq,private)');
     } else if (requestedType === 'favorites') {
-      const favoriteKey = `favoriteFor${currentUserId}`;
-      filterParts.push(`(meta.${favoriteKey},eq,true)`);
+      filterParts.push(`(meta.${FAVORITE_META_KEY},eq,true)`);
     } else if (requestedType === 'unread') {
       filterParts.push('(unreadCount,gte,1)');
       params.sort = params.sort || '(unreadCount,desc)';
@@ -325,7 +370,7 @@ export async function getDialogs(req, res) {
     if (trimmedSearch && trimmedSearch.length >= MIN_SEARCH_LENGTH) {
       const escaped = escapeRegex(trimmedSearch);
       const pattern = `.*${escaped}.*`;
-      const nameMetaKey = `p2pDialogNameFor${currentUserId}`;
+      const nameMetaKey = P2P_DIALOG_NAME_KEY;
 
       if (requestedType === 'p2p') {
         // Search only in P2P dialogs by personalized name
@@ -1065,7 +1110,8 @@ export async function toggleDialogFavorite(req, res) {
   try {
     const { dialogId } = req.params;
     const currentUserId = req.user.userId;
-    const metaKey = `favoriteFor${currentUserId}`;
+    const legacyMetaKey = `${LEGACY_FAVORITE_PREFIX}${currentUserId}`;
+    const scopeParams = { scope: currentUserId };
 
     // Check if dialog exists and user is a member
     try {
@@ -1086,39 +1132,48 @@ export async function toggleDialogFavorite(req, res) {
       throw error;
     }
 
-    // Check if favorite already exists
-    // Note: Chat3 API doesn't support /api/meta/dialog/:dialogId/:key endpoint (returns 404)
-    // So we request all meta tags and check if the key exists
     let isFavorite = false;
     try {
-      const allMeta = await Chat3Client.getMeta('dialog', dialogId);
-      // Check if metaKey exists in the response
-      const metaValue = allMeta?.[metaKey]?.value || allMeta?.[metaKey] || allMeta?.data?.[metaKey]?.value || allMeta?.data?.[metaKey];
+      const metaResponse = await Chat3Client.getMeta('dialog', dialogId, null, scopeParams);
+      const metaValue = resolveFavoriteState(metaResponse, currentUserId);
       isFavorite = !!metaValue;
     } catch (error) {
       if (error.response?.status !== 404) {
         throw error;
       }
-      // If dialog not found (404), isFavorite remains false
     }
 
     if (isFavorite) {
-      // Remove from favorites
-      await Chat3Client.deleteMeta('dialog', dialogId, metaKey);
+      await Chat3Client.deleteMeta('dialog', dialogId, FAVORITE_META_KEY, scopeParams);
+      try {
+        await Chat3Client.deleteMeta('dialog', dialogId, legacyMetaKey);
+      } catch (legacyError) {
+        if (legacyError.response?.status !== 404) {
+          throw legacyError;
+        }
+      }
+
       return res.json({
         success: true,
         isFavorite: false,
         message: 'Dialog removed from favorites',
       });
-    } else {
-      // Add to favorites
-      await Chat3Client.setMeta('dialog', dialogId, metaKey, { value: true });
-      return res.json({
-        success: true,
-        isFavorite: true,
-        message: 'Dialog added to favorites',
-      });
     }
+
+    await Chat3Client.setMeta(
+      'dialog',
+      dialogId,
+      FAVORITE_META_KEY,
+      { value: true },
+      scopeParams,
+    );
+    await Chat3Client.setMeta('dialog', dialogId, legacyMetaKey, { value: true });
+
+    return res.json({
+      success: true,
+      isFavorite: true,
+      message: 'Dialog added to favorites',
+    });
   } catch (error) {
     console.error('Error toggling dialog favorite:', error);
     return res.status(500).json({

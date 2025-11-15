@@ -319,6 +319,13 @@ interface ImageMessagePayload {
   caption?: string
 }
 
+const FAVORITE_META_KEY = 'favorite'
+const LEGACY_FAVORITE_PREFIX = 'favoriteFor'
+const P2P_NAME_META_KEY = 'p2pDialogName'
+const P2P_AVATAR_META_KEY = 'p2pDialogAvatar'
+const LEGACY_P2P_NAME_PREFIX = 'p2pDialogNameFor'
+const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor'
+
 const authStore = useAuthStore()
 const messagesStore = useMessagesStore()
 const dialogsStore = useDialogsStore()
@@ -334,14 +341,36 @@ const fetchingUserNames = new Set<string>()
 const existingMemberIds = ref<string[]>([])
 const quotedMessage = ref<Message | null>(null)
 const currentUserId = computed(() => authStore.user?.userId || '')
+const legacyFavoriteKey = computed(() =>
+  currentUserId.value ? `${LEGACY_FAVORITE_PREFIX}${currentUserId.value}` : null
+)
+
+function unwrapMetaValue(entry: any) {
+  if (entry == null) return undefined
+  if (typeof entry === 'object' && 'value' in entry) {
+    return entry.value
+  }
+  return entry
+}
+
+function getDialogMetaValue(key: string, legacyPrefix?: string): any {
+  if (!props.dialog?.meta) return undefined
+  const scopedValue = unwrapMetaValue(props.dialog.meta[key])
+  if (scopedValue !== undefined) {
+    return scopedValue
+  }
+
+  if (legacyPrefix && currentUserId.value) {
+    return unwrapMetaValue(props.dialog.meta[`${legacyPrefix}${currentUserId.value}`])
+  }
+
+  return undefined
+}
 
 // Check if dialog is favorite based on meta tag
 const isFavorite = computed(() => {
-  if (!props.dialog?.meta || !currentUserId.value) return false
-  const favoriteKey = `favoriteFor${currentUserId.value}`
-  const favoriteValue = props.dialog.meta[favoriteKey]
-  // Support both { value: true } and direct true value
-  return !!(favoriteValue?.value ?? favoriteValue)
+  const favoriteValue = getDialogMetaValue(FAVORITE_META_KEY, LEGACY_FAVORITE_PREFIX)
+  return !!favoriteValue
 })
 const isP2PDialog = computed(() => {
   const chatType = props.dialog.chatType || props.dialog.meta?.type
@@ -349,13 +378,19 @@ const isP2PDialog = computed(() => {
 })
 const p2pNameForCurrent = computed(() => {
   if (!isP2PDialog.value || !currentUserId.value) return undefined
-  const key = `p2pDialogNameFor${currentUserId.value}`
-  return props.dialog.meta?.[key] || props.dialog.name || props.dialog.dialogName
+  return (
+    getDialogMetaValue(P2P_NAME_META_KEY, LEGACY_P2P_NAME_PREFIX) ||
+    props.dialog.name ||
+    props.dialog.dialogName
+  )
 })
 const p2pAvatarForCurrent = computed(() => {
   if (!isP2PDialog.value || !currentUserId.value) return undefined
-  const key = `p2pDialogAvatarFor${currentUserId.value}`
-  return props.dialog.meta?.[key] || props.dialog.avatar || null
+  return (
+    getDialogMetaValue(P2P_AVATAR_META_KEY, LEGACY_P2P_AVATAR_PREFIX) ||
+    props.dialog.avatar ||
+    null
+  )
 })
 
 // Check if current dialog is a group chat
@@ -1079,30 +1114,27 @@ async function toggleFavorite() {
   try {
     const response = await api.toggleDialogFavorite(props.dialog.dialogId)
     if (response.success) {
-      // Update dialog meta in store to reflect the change immediately
-      const favoriteKey = `favoriteFor${currentUserId.value}`
-      if (dialogsStore.currentDialog) {
-        if (!dialogsStore.currentDialog.meta) {
-          dialogsStore.currentDialog.meta = {}
+      const applyFavoriteMeta = (dialog: Dialog | null) => {
+        if (!dialog) return
+        if (!dialog.meta) {
+          dialog.meta = {}
         }
         if (response.isFavorite) {
-          dialogsStore.currentDialog.meta[favoriteKey] = { value: true }
+          dialog.meta[FAVORITE_META_KEY] = { value: true }
+          if (legacyFavoriteKey.value) {
+            dialog.meta[legacyFavoriteKey.value] = { value: true }
+          }
         } else {
-          delete dialogsStore.currentDialog.meta[favoriteKey]
+          delete dialog.meta[FAVORITE_META_KEY]
+          if (legacyFavoriteKey.value) {
+            delete dialog.meta[legacyFavoriteKey.value]
+          }
         }
       }
-      // Also update in dialogs list if present
-      const dialogInList = dialogsStore.dialogs.find(d => d.dialogId === props.dialog.dialogId)
-      if (dialogInList) {
-        if (!dialogInList.meta) {
-          dialogInList.meta = {}
-        }
-        if (response.isFavorite) {
-          dialogInList.meta[favoriteKey] = { value: true }
-        } else {
-          delete dialogInList.meta[favoriteKey]
-        }
-      }
+
+      applyFavoriteMeta(dialogsStore.currentDialog || null)
+      const dialogInList = dialogsStore.dialogs.find(d => d.dialogId === props.dialog.dialogId) || null
+      applyFavoriteMeta(dialogInList)
     }
   } catch (error) {
     console.error('Failed to toggle favorite:', error)

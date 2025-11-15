@@ -251,33 +251,47 @@ class Chat3Client {
   /**
    * Get meta for entity
    */
-  async getMeta(entityType, entityId, key = null) {
+  async getMeta(entityType, entityId, key = null, params = {}) {
     // Use entityId as-is - Axios will handle URL encoding automatically
     // For dialogMember, entityId should be in format: dialogId:userId
-    const path = key 
+    const path = key
       ? `/meta/${entityType}/${entityId}/${key}`
       : `/meta/${entityType}/${entityId}`;
-    const response = await this.client.get(path);
+    const response = await this.client.get(path, { params });
     return response.data;
   }
 
   /**
    * Set meta for entity
    */
-  async setMeta(entityType, entityId, key, data) {
+  async setMeta(entityType, entityId, key, data = {}, options = {}) {
     // Use entityId as-is - Axios will handle URL encoding automatically
     // For dialogMember, entityId should be in format: dialogId:userId
-    const response = await this.client.put(`/meta/${entityType}/${entityId}/${key}`, data);
+    const payload = {
+      ...data,
+    };
+
+    if (options.scope) {
+      payload.scope = options.scope;
+    }
+
+    const response = await this.client.put(
+      `/meta/${entityType}/${entityId}/${key}`,
+      payload,
+    );
     return response.data;
   }
 
   /**
    * Delete meta key
    */
-  async deleteMeta(entityType, entityId, key) {
+  async deleteMeta(entityType, entityId, key, params = {}) {
     // Use entityId as-is - Axios will handle URL encoding automatically
     // For dialogMember, entityId should be in format: dialogId:userId
-    const response = await this.client.delete(`/meta/${entityType}/${entityId}/${key}`);
+    const response = await this.client.delete(
+      `/meta/${entityType}/${entityId}/${key}`,
+      { params },
+    );
     return response.data;
   }
 }

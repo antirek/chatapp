@@ -262,6 +262,9 @@ import Avatar from './Avatar.vue'
 import type { Dialog } from '@/types'
 import { formatTypingUsers } from '@/utils/typing'
 
+const P2P_AVATAR_META_KEY = 'p2pDialogAvatar'
+const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor'
+
 const emit = defineEmits<{
   select: [dialogId: string]
 }>()
@@ -472,19 +475,38 @@ function getTypingPreview(dialog: Dialog): string | null {
   return formatted || 'печатают...'
 }
 
+function unwrapMetaValue(entry: any) {
+  if (entry == null) return undefined
+  if (typeof entry === 'object' && 'value' in entry) {
+    return entry.value
+  }
+  return entry
+}
+
+function getP2PAvatar(dialog: Dialog): string | undefined {
+  if (!dialog.meta) {
+    return undefined
+  }
+
+  const direct = unwrapMetaValue(dialog.meta[P2P_AVATAR_META_KEY])
+  if (direct !== undefined) {
+    return direct
+  }
+
+  if (authStore.user?.userId) {
+    return unwrapMetaValue(dialog.meta[`${LEGACY_P2P_AVATAR_PREFIX}${authStore.user.userId}`])
+  }
+
+  return undefined
+}
+
 function getDialogAvatar(dialog: Dialog): string | null {
   // For group chats, return null to show default group icon
   if (isGroupChat(dialog)) {
     return null
   }
   
-  const currentUserId = authStore.user?.userId
-  if (!currentUserId) {
-    return dialog.avatar || null
-  }
-
-  const metaKey = `p2pDialogAvatarFor${currentUserId}`
-  return dialog.avatar || dialog.meta?.[metaKey] || null
+  return dialog.avatar || getP2PAvatar(dialog) || null
 }
 
 function isGroupChat(dialog: Dialog): boolean {

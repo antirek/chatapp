@@ -106,27 +106,58 @@ export async function getP2PUserProfile(userId) {
   }
 }
 
-async function setDialogMeta(dialogId, key, value) {
+const P2P_DIALOG_NAME_KEY = 'p2pDialogName';
+const P2P_DIALOG_AVATAR_KEY = 'p2pDialogAvatar';
+
+function legacyDialogNameKey(userId) {
+  return `p2pDialogNameFor${userId}`;
+}
+
+function legacyDialogAvatarKey(userId) {
+  return `p2pDialogAvatarFor${userId}`;
+}
+
+async function setDialogMeta(dialogId, key, value, { scope, legacyKey } = {}) {
+  const scopedParams = scope ? { scope } : {};
+
   if (value == null || value === '') {
     try {
-      await Chat3Client.deleteMeta('dialog', dialogId, key);
+      await Chat3Client.deleteMeta('dialog', dialogId, key, scopedParams);
     } catch (error) {
       if (error.response?.status !== 404) {
-        console.warn(`⚠️ Failed to delete dialog meta ${key} for ${dialogId}:`, error.message);
+        console.warn(
+          `⚠️ Failed to delete dialog meta ${key} for ${dialogId}:`,
+          error.message,
+        );
+      }
+    }
+
+    if (legacyKey) {
+      try {
+        await Chat3Client.deleteMeta('dialog', dialogId, legacyKey);
+      } catch (legacyError) {
+        if (legacyError.response?.status !== 404) {
+          console.warn(
+            `⚠️ Failed to delete legacy dialog meta ${legacyKey} for ${dialogId}:`,
+            legacyError.message,
+          );
+        }
       }
     }
     return;
   }
 
-  await Chat3Client.setMeta('dialog', dialogId, key, { value });
-}
+  await Chat3Client.setMeta(
+    'dialog',
+    dialogId,
+    key,
+    { value },
+    scopedParams,
+  );
 
-function dialogNameKey(userId) {
-  return `p2pDialogNameFor${userId}`;
-}
-
-function dialogAvatarKey(userId) {
-  return `p2pDialogAvatarFor${userId}`;
+  if (legacyKey) {
+    await Chat3Client.setMeta('dialog', dialogId, legacyKey, { value });
+  }
 }
 
 export async function updateP2PPersonalization(dialogId, userIdA, userIdB) {
@@ -142,10 +173,22 @@ export async function updateP2PPersonalization(dialogId, userIdA, userIdB) {
     const avatarForB = resolveUserAvatar(userA);
 
     const tasks = [
-      setDialogMeta(dialogId, dialogNameKey(userIdA), nameForA),
-      setDialogMeta(dialogId, dialogNameKey(userIdB), nameForB),
-      setDialogMeta(dialogId, dialogAvatarKey(userIdA), avatarForA),
-      setDialogMeta(dialogId, dialogAvatarKey(userIdB), avatarForB),
+      setDialogMeta(dialogId, P2P_DIALOG_NAME_KEY, nameForA, {
+        scope: userIdA,
+        legacyKey: legacyDialogNameKey(userIdA),
+      }),
+      setDialogMeta(dialogId, P2P_DIALOG_NAME_KEY, nameForB, {
+        scope: userIdB,
+        legacyKey: legacyDialogNameKey(userIdB),
+      }),
+      setDialogMeta(dialogId, P2P_DIALOG_AVATAR_KEY, avatarForA, {
+        scope: userIdA,
+        legacyKey: legacyDialogAvatarKey(userIdA),
+      }),
+      setDialogMeta(dialogId, P2P_DIALOG_AVATAR_KEY, avatarForB, {
+        scope: userIdB,
+        legacyKey: legacyDialogAvatarKey(userIdB),
+      }),
     ];
 
     await Promise.all(tasks);
