@@ -276,7 +276,7 @@
 
     <!-- Add Group Members Modal -->
     <AddGroupMembersModal
-      v-if="isGroupChat"
+      v-if="isGroupChat || isBusinessContact"
       :is-open="isAddMembersOpen"
       :dialog-id="dialog.dialogId"
       :existing-member-ids="existingMemberIds"
@@ -360,6 +360,10 @@ const p2pAvatarForCurrent = computed(() => {
 const isGroupChat = computed(() => {
   const chatType = props.dialog.chatType || props.dialog.meta?.type
   return chatType === 'group'
+})
+const isBusinessContact = computed(() => {
+  const chatType = props.dialog.chatType || props.dialog.meta?.type
+  return chatType === 'personal_contact'
 })
 
 const typingUsers = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
@@ -914,7 +918,7 @@ async function loadOtherUserInfo() {
 
 async function openDialogInfo() {
   // For group chats, load existing member IDs for AddGroupMembersModal
-  if (isGroupChat.value) {
+  if (isGroupChat.value || isBusinessContact.value) {
     await loadExistingMemberIds()
   }
   isDialogInfoOpen.value = true

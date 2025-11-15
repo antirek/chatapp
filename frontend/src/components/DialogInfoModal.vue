@@ -39,6 +39,7 @@
               v-else-if="dialogType === 'personal_contact'"
               :dialog="dialog"
               @close="close"
+              @add-members="$emit('add-members')"
             />
             <div
               v-else
