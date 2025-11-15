@@ -839,10 +839,26 @@ export async function addDialogMember(req, res) {
     }
 
     const userName = await resolveUserName(userId, null);
+    let dialogType = null;
+    let contactId = null;
 
     try {
+      const dialogResponse = await Chat3Client.getDialog(dialogId);
+      const dialogMeta = dialogResponse?.data?.meta || dialogResponse?.meta || {};
+      dialogType = dialogMeta?.type?.value || dialogMeta?.type || dialogResponse?.data?.type || null;
+      contactId = dialogMeta?.contactId?.value || dialogMeta?.contactId || null;
+    } catch (dialogError) {
+      console.warn(`⚠️ Failed to load dialog ${dialogId} for system message context:`, dialogError.message);
+    }
+
+    try {
+      const content =
+        dialogType === 'personal_contact' && contactId
+          ? `Пользователь ${userName} подключился к бизнес-чату`
+          : `Пользователь ${userName} вошел в группу`;
+
       await Chat3Client.createMessage(dialogId, {
-        content: `Пользователь ${userName} вошел в группу`,
+        content,
         senderId: 'system',
         type: mapOutgoingMessageType('system'),
       });
