@@ -5,6 +5,7 @@ import {
   getP2PUserProfile,
 } from '../utils/p2pPersonalization.js';
 import { resolveNameFromMeta } from '../utils/nameResolver.js';
+import Contact from '../models/Contact.js';
 // import { authenticate } from '../middleware/auth.js';
 
 const MIN_SEARCH_LENGTH = 2;
@@ -195,6 +196,10 @@ export async function processP2PDialog(dialog, currentUser) {
     return dialog;
   }
 
+  if (dialogType === 'personal_contact') {
+    dialog = await enrichBusinessContactDialog(dialog);
+  }
+
   const nameKey = `p2pDialogNameFor${currentUserId}`;
   const avatarKey = `p2pDialogAvatarFor${currentUserId}`;
   const personalizedName = extractMetaValue(dialog.meta, nameKey);
@@ -213,8 +218,9 @@ export async function processP2PDialog(dialog, currentUser) {
 
   // For personal_contact dialogs, use dialog.name (contact name) as fallback
   // For p2p dialogs, use dialog.dialogId as fallback
+  const contactName = dialog.meta?.contactName?.value || dialog.meta?.contactName;
   const nameFallback = dialogType === 'personal_contact' 
-    ? (dialog.name || dialog.dialogName || dialog.dialogId)
+    ? (contactName || dialog.name || dialog.dialogName || dialog.dialogId)
     : dialog.dialogId;
   
   const resolvedName = name ?? personalizedName ?? nameFallback;
@@ -227,6 +233,45 @@ export async function processP2PDialog(dialog, currentUser) {
     avatar: resolvedAvatar,
     chatType: dialogType === 'personal_contact' ? 'personal_contact' : 'p2p',
   };
+}
+
+async function enrichBusinessContactDialog(dialog) {
+  const meta = dialog.meta || {};
+  const contactId =
+    meta.contactId?.value ||
+    meta.contactId ||
+    dialog?.contact?.contactId ||
+    null;
+
+  if (!contactId) {
+    return dialog;
+  }
+
+  try {
+    const contact = await Contact.findOne({ contactId }).lean().exec();
+    if (contact?.name) {
+      const updatedMeta = {
+        ...meta,
+        contactName:
+          meta.contactName ||
+          { value: contact.name },
+        contactPhone:
+          meta.contactPhone ||
+          (contact.phone ? { value: contact.phone } : undefined),
+      };
+
+      return {
+        ...dialog,
+        name: contact.name,
+        dialogName: contact.name,
+        meta: updatedMeta,
+      };
+    }
+  } catch (error) {
+    console.warn(`Failed to load contact ${contactId}:`, error.message);
+  }
+
+  return dialog;
 }
 
 export async function getDialogs(req, res) {

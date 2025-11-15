@@ -3,7 +3,7 @@
     <!-- Chat Header -->
     <div class="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
       <div class="flex-1">
-        <h2 class="text-lg font-semibold">{{ dialog.name || dialog.dialogName || 'Диалог' }}</h2>
+        <h2 class="text-lg font-semibold">{{ dialogDisplayName }}</h2>
         <p v-if="typingUsersText" class="text-sm text-primary-600 animate-pulse">
           {{ typingUsersText }}
         </p>
@@ -287,7 +287,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, watchEffect, nextTick, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
 import { useDialogsStore } from '@/stores/dialogs'
@@ -329,6 +329,8 @@ const isAddMembersOpen = ref(false)
 const isMarkingRead = ref(false)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
+const userNamesCache = ref<Record<string, string>>({})
+const fetchingUserNames = new Set<string>()
 const existingMemberIds = ref<string[]>([])
 const quotedMessage = ref<Message | null>(null)
 const currentUserId = computed(() => authStore.user?.userId || '')
@@ -364,6 +366,26 @@ const isGroupChat = computed(() => {
 const isBusinessContact = computed(() => {
   const chatType = props.dialog.chatType || props.dialog.meta?.type
   return chatType === 'personal_contact'
+})
+const businessContactDisplayName = computed(() => {
+  if (!isBusinessContact.value) {
+    return null
+  }
+
+  return (
+    props.dialog.meta?.contactName?.value ||
+    props.dialog.meta?.contactName ||
+    props.dialog.name ||
+    props.dialog.dialogName ||
+    'Бизнес-контакт'
+  )
+})
+const dialogDisplayName = computed(() => {
+  if (isBusinessContact.value) {
+    return businessContactDisplayName.value || 'Бизнес-контакт'
+  }
+
+  return props.dialog.name || props.dialog.dialogName || 'Диалог'
 })
 
 const typingUsers = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
@@ -404,6 +426,29 @@ watch(() => props.dialog?.dialogId, async (dialogId) => {
   }
 }, { immediate: true })
 
+watch(
+  () => authStore.user,
+  (user) => {
+    if (user?.userId && user.name) {
+      userNamesCache.value[user.userId] = user.name
+    }
+  },
+  { immediate: true }
+)
+
+watchEffect(() => {
+  if (isBusinessContact.value) {
+    const contactId =
+      props.dialog.meta?.contactId?.value ||
+      props.dialog.meta?.contactId ||
+      props.dialog.dialogId
+    const name = businessContactDisplayName.value
+    if (contactId && name) {
+      userNamesCache.value[contactId] = name
+    }
+  }
+})
+
 // Load other user info and current user avatar on mount
 onMounted(async () => {
   syncOtherUserFromMeta()
@@ -429,6 +474,28 @@ async function loadCurrentUserAvatar() {
     // Cache null on error
     userAvatars.value[authStore.user.userId] = null
     console.error('Failed to load current user avatar:', error)
+  }
+}
+
+async function fetchUserName(userId: string) {
+  if (!userId || userId.startsWith('cnt_')) {
+    return
+  }
+
+  if (userNamesCache.value[userId] || fetchingUserNames.has(userId)) {
+    return
+  }
+
+  fetchingUserNames.add(userId)
+  try {
+    const response = await api.getUser(userId)
+    if (response.success && response.data?.name) {
+      userNamesCache.value[userId] = response.data.name
+    }
+  } catch (error) {
+    console.warn('Failed to fetch user name:', error)
+  } finally {
+    fetchingUserNames.delete(userId)
   }
 }
 
@@ -501,9 +568,19 @@ function handleScroll(event: Event) {
 }
 
 function isOwnMessage(message: Message): boolean {
-  const result = message.senderId === authStore.user?.userId
-  console.log('isOwnMessage:', message.senderId, '===', authStore.user?.userId, '=', result)
-  return result
+  if (isBusinessContact.value) {
+    const contactId =
+      props.dialog.meta?.contactId?.value ||
+      props.dialog.meta?.contactId ||
+      props.dialog.dialogId
+    return (
+      contactId &&
+      message.senderId &&
+      !message.senderId.startsWith('cnt_')
+    )
+  }
+
+  return message.senderId === authStore.user?.userId
 }
 
 function getNormalizedType(message: Message): string {
@@ -641,41 +718,73 @@ async function markMessageAsRead(message: Message) {
 }
 
 function getSenderName(message: Message): string {
+  const contactId =
+    props.dialog.meta?.contactId?.value ||
+    props.dialog.meta?.contactId ||
+    props.dialog.dialogId
+
+  if (isBusinessContact.value && message.senderId?.startsWith('cnt_')) {
+    return props.dialog.name || props.dialog.dialogName || 'Бизнес-контакт'
+  }
+
   const isOwn = isOwnMessage(message)
-  
-  // For own messages, try to get current user's name
+
   if (isOwn) {
-    // Priority 1: Check if message has sender object with name (from Chat3 API)
     if (message.sender?.name) {
       return message.sender.name
     }
-    
-    // Priority 2: Use current user's name from authStore
+
     if (authStore.user?.name) {
       return authStore.user.name
     }
-    
-    // Fallback: Show senderId
+
     return message.senderId
   }
-  
-  // For other user's messages
-  // Priority 1: Check if message has sender object with name (from Chat3 API)
+
   if (message.sender?.name) {
     return message.sender.name
   }
-  
-  // Priority 2: Use otherUser name if senderId matches (loaded from dialog members)
+
+  if (userNamesCache.value[message.senderId]) {
+    return userNamesCache.value[message.senderId]
+  }
+
+  if (isBusinessContact.value && message.senderId && !message.senderId.startsWith('cnt_')) {
+    return resolveUserNameFromMessage(message)
+  }
+
+  if (userNamesCache.value[message.senderId]) {
+    return userNamesCache.value[message.senderId]
+  }
+
   if (message.senderId === otherUser.value?.userId && otherUser.value?.name) {
     return otherUser.value.name
   }
-  
+
   if (isP2PDialog.value && p2pNameForCurrent.value) {
     return p2pNameForCurrent.value
   }
 
-  // Fallback: Show senderId if name is not available
   return message.senderId
+}
+
+function resolveUserNameFromMessage(message: Message): string {
+  if (message.sender?.name) {
+    return message.sender.name
+  }
+
+  if (userNamesCache.value[message.senderId]) {
+    return userNamesCache.value[message.senderId]
+  }
+
+  void fetchUserName(message.senderId)
+
+  const fallback =
+    message.senderId === authStore.user?.userId
+      ? authStore.user?.name
+      : undefined
+
+  return fallback || `Пользователь ${message.senderId}`
 }
 
 function getSenderAvatar(message: Message): string | null {
@@ -905,6 +1014,9 @@ async function loadOtherUserInfo() {
               avatar: userResponse.data.avatar || otherUser.value.avatar || null
             }
             userAvatars.value[otherMember.userId] = otherUser.value.avatar
+            if (otherUser.value.name) {
+              userNamesCache.value[otherMember.userId] = otherUser.value.name
+            }
           }
         } catch (error) {
           console.warn('Failed to load detailed user info:', error)
@@ -933,6 +1045,11 @@ async function loadExistingMemberIds() {
     const response = await api.getDialogMembers(props.dialog.dialogId)
     if (response.success && response.data) {
       existingMemberIds.value = response.data.map((member: any) => member.userId)
+      response.data.forEach((member: any) => {
+        if (member.userId && member.name) {
+          userNamesCache.value[member.userId] = member.name
+        }
+      })
     }
   } catch (error) {
     console.error('Failed to load existing member IDs:', error)

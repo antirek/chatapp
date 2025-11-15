@@ -80,6 +80,7 @@ export async function createBusinessContact(req, res) {
       meta: {
         type: { value: 'personal_contact' },
         contactId: { value: contact.contactId },
+        contactName: { value: name },
       },
     });
     

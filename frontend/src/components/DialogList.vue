@@ -95,7 +95,7 @@
                       {{ getGroupBadgeIcon(dialog) }}
                     </span>
                     <span class="truncate">
-                      {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                      {{ getDialogDisplayName(dialog) }}
                     </span>
                   </h3>
                   <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
@@ -180,7 +180,7 @@
             <div class="flex-shrink-0">
               <Avatar
                 :avatar="getDialogAvatar(dialog)"
-                :name="dialog.name || dialog.dialogName || 'Диалог'"
+                :name="getDialogDisplayName(dialog)"
                 :userId="dialog.dialogId"
                 :is-group="isGroupChat(dialog)"
                 size="md"
@@ -201,7 +201,7 @@
                     {{ getGroupBadgeIcon(dialog) }}
                   </span>
                   <span class="truncate">
-                    {{ dialog.name || dialog.dialogName || 'Диалог' }}
+                    {{ getDialogDisplayName(dialog) }}
                   </span>
                 </h3>
                 <span v-if="dialog.lastMessageAt" class="text-xs text-gray-500 ml-2 flex-shrink-0">
@@ -490,6 +490,25 @@ function getDialogAvatar(dialog: Dialog): string | null {
 function isGroupChat(dialog: Dialog): boolean {
   const chatType = dialog.chatType || dialog.meta?.type
   return chatType === 'group'
+}
+
+function isBusinessContact(dialog: Dialog): boolean {
+  const chatType = dialog.chatType || dialog.meta?.type
+  return chatType === 'personal_contact'
+}
+
+function getDialogDisplayName(dialog: Dialog): string {
+  if (isBusinessContact(dialog)) {
+    return (
+      dialog.meta?.contactName?.value ||
+      dialog.meta?.contactName ||
+      dialog.name ||
+      dialog.dialogName ||
+      dialog.dialogId
+    )
+  }
+
+  return dialog.name || dialog.dialogName || dialog.dialogId
 }
 
 function getGroupBadgeLabel(dialog: Dialog): string {
