@@ -8,7 +8,9 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "worker": "node --watch src/workers/start.js",
-    "worker:start": "node src/workers/start.js"
+    "worker:start": "node src/workers/start.js",
+    "bot:worker": "node --watch src/workers/botStart.js",
+    "bot:start": "node src/workers/botStart.js"
   },
   "keywords": [
     "chat",

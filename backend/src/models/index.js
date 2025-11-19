@@ -4,4 +4,5 @@ export { default as User } from './User.js';
 export { default as Contact } from './Contact.js';
 export { default as Channel } from './Channel.js';
 export { default as Service } from './Service.js';
+export { default as Bot } from './Bot.js';
 

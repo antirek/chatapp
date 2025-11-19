@@ -1,5 +1,6 @@
 import amqp from 'amqplib';
 import config from '../config/index.js';
+import { generateUserRoutingKey } from '../utils/userTypeExtractor.js';
 
 /**
  * RabbitMQ Service for consuming Chat3 updates
@@ -100,8 +101,9 @@ class RabbitMQService {
         exclusive: false,
       });
 
-      // Bind queue to exchange with routing key: user.{userId}.*
-      const routingKey = `user.${userId}.*`;
+      // Bind queue to exchange with routing key: user.{type}.{userId}.*
+      // New format: user.{type}.{userId}.{updateType}
+      const routingKey = generateUserRoutingKey(userId, '*');
       await this.channel.bindQueue(queue.queue, config.rabbitmq.updatesExchange, routingKey);
 
       console.log(`📬 User ${userId} subscribed to updates`);

@@ -1,6 +1,7 @@
 import amqp from 'amqplib';
 import config from '../config/index.js';
 import messageSenderWorker from '../workers/messageSender.js';
+import { extractUserType, generateUserRoutingKey } from '../utils/userTypeExtractor.js';
 
 /**
  * RabbitMQ Consumer для получения Updates от Chat3
@@ -85,7 +86,8 @@ class RabbitMQConsumer {
 
     try {
       const queueName = `user_${userId}_updates`;
-      const routingKey = `user.${userId}.*`; // Все updates пользователя
+      // New format: user.{type}.{userId}.*
+      const routingKey = generateUserRoutingKey(userId, '*');
 
       // Создать очередь (сохраняется 1 час для краткосрочных отключений)
       await this.channel.assertQueue(queueName, {
@@ -212,15 +214,18 @@ class RabbitMQConsumer {
       });
 
       // Bind to exchange with routing key for all user events
-      // Pattern: user.*.* - matches all events for all users (user.{userId}.{eventType})
+      // New format: user.{type}.{userId}.{updateType}
+      // Pattern: user.# - matches all events for all users of all types
+      // For message sender worker, we need all contacts (cnt_*) updates
+      // Using user.cnt.# to match all contacts, or user.# for all users
       await this.channel.bindQueue(
         queueName,
         config.rabbitmq.updatesExchange,
-        'user.*.*' // Matches all events for all users
+        'user.#' // Matches all events for all users of all types (topic exchange wildcard)
       );
 
       console.log(`📤 Created global message queue: ${queueName}`);
-      console.log(`   Routing: user.*.*`);
+      console.log(`   Routing: user.# (all users of all types)`);
 
       // Start consuming messages for message sender worker
       const { consumerTag } = await this.channel.consume(

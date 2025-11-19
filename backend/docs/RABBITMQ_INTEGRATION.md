@@ -17,7 +17,7 @@
        ▼
 ┌──────────────┐
 │   RabbitMQ   │  Exchange: chat3_updates
-│   Updates    │  Routing: user.{userId}.{updateType}
+│   Updates    │  Routing: user.{type}.{userId}.{updateType}
 └──────┬───────┘
        │
        ▼
@@ -42,7 +42,7 @@
 **Функции:**
 - Подключение к RabbitMQ
 - Создание персональных очередей для пользователей
-- Подписка на updates с routing key `user.{userId}.*`
+- Подписка на updates с routing key `user.{type}.{userId}.*` (новый формат Chat3)
 - Автоматическое переподключение при обрыве связи
 - Управление подписками пользователей
 
@@ -292,14 +292,37 @@ RABBITMQ_UPDATES_EXCHANGE=chat3_updates
 
 ### Формат Routing Keys
 
+**Новый формат (Chat3 Updates 2.0):**
 ```
-user.{userId}.{updateType}
+user.{type}.{userId}.{updateType}
 ```
 
-Примеры:
-- `user.usr_a3f9k2p1.messageupdate` - message updates для пользователя
-- `user.usr_a3f9k2p1.dialogupdate` - dialog updates для пользователя
-- `user.usr_a3f9k2p1.*` - все updates для пользователя
+Где:
+- `type` — тип пользователя, извлекается из префикса `userId` (до первого подчеркивания)
+  - Примеры: `usr_123` → `usr`, `cnt_456` → `cnt`, `bot_789` → `bot`
+  - Если префикса нет, используется `usr` по умолчанию
+- `userId` — полный идентификатор пользователя
+- `updateType` — тип обновления (`messageupdate`, `dialogupdate`, `dialogmemberupdate`, `typing`)
+
+**Примеры:**
+- `user.usr.usr_a3f9k2p1.messageupdate` - message updates для пользователя `usr_a3f9k2p1`
+- `user.usr.usr_a3f9k2p1.dialogupdate` - dialog updates для пользователя `usr_a3f9k2p1`
+- `user.usr.usr_a3f9k2p1.*` - все updates для пользователя `usr_a3f9k2p1`
+- `user.cnt.cnt_abc123.messageupdate` - message updates для контакта `cnt_abc123`
+- `user.bot.bot_xyz789.*` - все updates для бота `bot_xyz789`
+- `user.cnt.#` - все updates для всех контактов
+- `user.#` - все updates для всех пользователей всех типов
+
+**Утилита для генерации routing keys:**
+```javascript
+import { extractUserType, generateUserRoutingKey } from '../utils/userTypeExtractor.js';
+
+// Извлечь тип пользователя
+const userType = extractUserType('usr_abc123'); // 'usr'
+
+// Сгенерировать routing key
+const routingKey = generateUserRoutingKey('usr_abc123', '*'); // 'user.usr.usr_abc123.*'
+```
 
 ## Мониторинг
 
