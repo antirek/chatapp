@@ -204,18 +204,23 @@ class BotService {
           const existingUser = await Chat3Client.getUser(botUserId);
           console.log(`✅ Bot ${botUserId} already exists in Chat3`);
           
-          // Check if type is set correctly
+          // Check if type and name are set correctly
           const userData = existingUser.data || existingUser;
-          if (userData.type !== 'bot') {
-            console.log(`🔵 Updating bot ${botUserId} type to 'bot' in Chat3...`);
-            await Chat3Client.updateUser(botUserId, { type: 'bot' });
-            console.log(`✅ Updated bot ${botUserId} type to 'bot'`);
+          const needsUpdate = userData.type !== 'bot' || userData.name !== 'Echo';
+          
+          if (needsUpdate) {
+            console.log(`🔵 Updating bot ${botUserId} in Chat3...`);
+            await Chat3Client.updateUser(botUserId, { 
+              type: 'bot',
+              name: 'Echo',
+            });
+            console.log(`✅ Updated bot ${botUserId} in Chat3 (type: 'bot', name: 'Echo')`);
           }
         } catch (error) {
           if (error.response?.status === 404) {
             console.log(`🔵 Creating bot ${botUserId} in Chat3 as user with type 'bot'...`);
             await Chat3Client.createUser(botUserId, {
-              name: echoBot.name,
+              name: 'Echo', // Explicit name as requested
               type: 'bot',
               meta: {
                 description: echoBot.description,
@@ -223,7 +228,7 @@ class BotService {
                 botType: echoBot.type, // system
               },
             });
-            console.log(`✅ Created bot ${botUserId} in Chat3 with type 'bot'`);
+            console.log(`✅ Created bot ${botUserId} in Chat3 with type 'bot' and name 'Echo'`);
           } else {
             throw error;
           }

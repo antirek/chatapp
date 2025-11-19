@@ -106,16 +106,16 @@ class BotWorker {
         exclusive: false,
       });
 
-      // Bind to exchange with routing key for all bot events
-      // Pattern: user.bot.# - matches all events for all bots
+      // Bind to exchange with routing key for bot_echo events
+      // Pattern: user.bot.bot_echo.* - matches all events for bot_echo specifically
       await this.channel.bindQueue(
         queueName,
         config.rabbitmq.updatesExchange,
-        'user.bot.#' // Matches all events for all bots
+        'user.bot.bot_echo.*' // Matches all events for bot_echo
       );
 
       console.log(`📤 Created bot worker queue: ${queueName}`);
-      console.log(`   Routing: user.bot.# (all bots)`);
+      console.log(`   Routing: user.bot.bot_echo.* (bot_echo only)`);
 
       // Start consuming messages for bot worker
       const { consumerTag } = await this.channel.consume(
