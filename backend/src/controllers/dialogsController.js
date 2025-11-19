@@ -680,18 +680,59 @@ export async function getPublicDialogs(req, res) {
 }
 
 export async function joinPublicDialog(req, res) {
+  const startTime = Date.now();
   try {
     const { dialogId } = req.params;
     const currentUserId = req.user.userId;
 
-    const dialog = await Chat3Client.getDialog(dialogId);
-    const dialogType = dialog.data?.meta?.type || dialog.data?.type;
-    const groupType = dialog.data?.meta?.groupType;
+    console.log(`\n🔵 [joinPublicDialog] ========== START ==========`);
+    console.log(`🔵 [joinPublicDialog] User: ${currentUserId}`);
+    console.log(`🔵 [joinPublicDialog] Dialog ID: ${dialogId}`);
+    console.log(`🔵 [joinPublicDialog] Timestamp: ${new Date().toISOString()}`);
 
-    if (dialogType !== 'group') {
+    console.log(`🔵 [joinPublicDialog] Step 1: Getting dialog from Chat3 API...`);
+    let dialogResponse;
+    try {
+      dialogResponse = await Chat3Client.getDialog(dialogId);
+      console.log(`✅ [joinPublicDialog] Step 1: Got dialog response`);
+      console.log(`🔵 [joinPublicDialog] Response type:`, typeof dialogResponse);
+      console.log(`🔵 [joinPublicDialog] Response keys:`, Object.keys(dialogResponse || {}));
+      console.log(`🔵 [joinPublicDialog] Full response (first 1000 chars):`, JSON.stringify(dialogResponse, null, 2).substring(0, 1000));
+    } catch (error) {
+      console.error(`❌ [joinPublicDialog] Step 1 FAILED:`, error.message);
+      console.error(`❌ [joinPublicDialog] Step 1 error stack:`, error.stack);
+      throw error;
+    }
+    
+    // Chat3Client.getDialog returns response.data, which may be { data: {...} } or just {...}
+    const dialog = dialogResponse?.data || dialogResponse;
+    console.log(`🔵 [joinPublicDialog] Extracted dialog:`, JSON.stringify(dialog, null, 2).substring(0, 500));
+    
+    // Handle both structures: { meta: {...} } and { data: { meta: {...} } }
+    const dialogMeta = dialog?.meta || dialog?.data?.meta || {};
+    const metaType = extractMetaValue(dialogMeta, 'type');
+    const dialogType = metaType || dialog?.type || dialog?.data?.type;
+    const groupType = extractMetaValue(dialogMeta, 'groupType');
+
+    console.log(`🔵 [joinPublicDialog] dialog.meta:`, JSON.stringify(dialogMeta, null, 2).substring(0, 300));
+    console.log(`🔵 [joinPublicDialog] dialog.type:`, dialog.type);
+    console.log(`🔵 [joinPublicDialog] metaType (from extractMetaValue):`, metaType);
+    console.log(`🔵 [joinPublicDialog] dialogType (final):`, dialogType);
+    console.log(`🔵 [joinPublicDialog] groupType:`, groupType);
+
+    if (!dialogType || dialogType !== 'group') {
+      console.error(`❌ [joinPublicDialog] Dialog type mismatch! Expected 'group', got '${dialogType}'`);
+      console.error(`❌ [joinPublicDialog] Full dialog object:`, JSON.stringify(dialog, null, 2));
       return res.status(400).json({
         success: false,
-        error: 'Dialog is not a group',
+        error: `Dialog is not a group (type: ${dialogType || 'undefined'})`,
+        details: {
+          dialogId,
+          dialogType,
+          metaType,
+          dialogMetaKeys: Object.keys(dialogMeta),
+          dialogKeys: Object.keys(dialog || {}),
+        },
       });
     }
 
@@ -702,22 +743,31 @@ export async function joinPublicDialog(req, res) {
       });
     }
 
-    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 200 });
-    const members = extractMembersFromResponse(membersResponse);
-    const isMember = members.some((member) => member.userId === currentUserId);
+    // Skip membership check - let Chat3 API handle it
+    // If user is already a member, addDialogMember will return an error
 
-    console.log(`🔍 Checking membership for user ${currentUserId} in dialog ${dialogId}`);
-    console.log('📋 Dialog members:', members.map((m) => m.userId));
-    console.log(`✅ Is member: ${isMember}`);
-
-    if (isMember) {
-      return res.status(400).json({
-        success: false,
-        error: 'User is already a member of this group',
-      });
+    console.log(`🔵 [joinPublicDialog] Step 2: Adding user ${currentUserId} to dialog ${dialogId}...`);
+    try {
+      await Chat3Client.addDialogMember(dialogId, currentUserId);
+      console.log(`✅ [joinPublicDialog] Step 2: Successfully added user to dialog`);
+    } catch (error) {
+      // Check if user is already a member
+      if (error.response?.status === 400 || error.response?.status === 409) {
+        const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message;
+        if (errorMessage.toLowerCase().includes('already') || errorMessage.toLowerCase().includes('member')) {
+          console.log(`ℹ️ [joinPublicDialog] User ${currentUserId} is already a member of dialog ${dialogId}`);
+          return res.status(400).json({
+            success: false,
+            error: 'User is already a member of this group',
+          });
+        }
+      }
+      console.error(`❌ [joinPublicDialog] Step 2 FAILED:`, error.message);
+      console.error(`❌ [joinPublicDialog] Step 2 error response:`, error.response?.data);
+      console.error(`❌ [joinPublicDialog] Step 2 error stack:`, error.stack);
+      throw error;
     }
-
-    await Chat3Client.addDialogMember(dialogId, currentUserId);
+    
     try {
       await Chat3Client.setMeta(
         'dialogMember',
@@ -730,32 +780,62 @@ export async function joinPublicDialog(req, res) {
       console.warn(`Failed to set memberType meta tag for user ${currentUserId} in dialog ${dialogId}:`, error.message);
     }
 
-    const userName = await resolveUserName(currentUserId, req.user?.name || null);
+    console.log(`🔵 [joinPublicDialog] Step 3: Resolving user name for ${currentUserId}`);
+    let userName;
+    try {
+      userName = await resolveUserName(currentUserId, req.user?.name || null);
+      console.log(`🔵 [joinPublicDialog] Resolved userName: ${userName}`);
+    } catch (error) {
+      console.error(`❌ [joinPublicDialog] Failed to resolve userName:`, error);
+      userName = req.user?.name || currentUserId;
+    }
 
+    console.log(`🔵 [joinPublicDialog] Step 4: Creating system message`);
     try {
       await Chat3Client.createMessage(dialogId, {
         content: `Пользователь ${userName} вошел в группу`,
         senderId: 'system',
         type: mapOutgoingMessageType('system'),
       });
+      console.log(`✅ [joinPublicDialog] Step 4: Created system message`);
     } catch (error) {
       console.warn(
-        `Failed to send system notification for user ${currentUserId}:`,
+        `⚠️ [joinPublicDialog] Step 4: Failed to send system notification (non-critical):`,
         error.message,
       );
     }
 
-    const updatedDialog = await Chat3Client.getDialog(dialogId);
+    console.log(`🔵 [joinPublicDialog] Step 5: Getting updated dialog`);
+    const updatedDialogResponse = await Chat3Client.getDialog(dialogId);
+    const updatedDialog = updatedDialogResponse.data || updatedDialogResponse;
 
+    console.log(`✅ [joinPublicDialog] Successfully joined dialog ${dialogId}`);
     return res.json({
       success: true,
-      data: updatedDialog.data,
+      data: updatedDialog,
     });
   } catch (error) {
-    console.error('Failed to join group:', error);
+    const duration = Date.now() - startTime;
+    console.error(`\n❌ [joinPublicDialog] ========== ERROR ==========`);
+    console.error(`❌ [joinPublicDialog] Duration: ${duration}ms`);
+    console.error(`❌ [joinPublicDialog] Error name:`, error.name);
+    console.error(`❌ [joinPublicDialog] Error message:`, error.message);
+    console.error(`❌ [joinPublicDialog] Error code:`, error.code);
+    if (error.response) {
+      console.error(`❌ [joinPublicDialog] Error response status:`, error.response.status);
+      console.error(`❌ [joinPublicDialog] Error response data:`, JSON.stringify(error.response.data, null, 2));
+      console.error(`❌ [joinPublicDialog] Error response headers:`, JSON.stringify(error.response.headers, null, 2));
+    }
+    if (error.request) {
+      console.error(`❌ [joinPublicDialog] Error request:`, error.request);
+    }
+    console.error(`❌ [joinPublicDialog] Error stack:`, error.stack);
+    console.error(`❌ [joinPublicDialog] ============================\n`);
+    
     return res.status(500).json({
       success: false,
       error: error.message,
+      details: error.response?.data || { code: error.code, name: error.name },
     });
   }
 }

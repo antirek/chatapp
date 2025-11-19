@@ -87,6 +87,7 @@ export async function getP2PUserProfile(userId) {
     return response.data || response;
   } catch (error) {
     if (error.response?.status === 404) {
+      // User not found in Chat3, try to get from local database
       const localUser = await User.findOne({ userId }).lean().exec();
       if (localUser) {
         return {
@@ -100,9 +101,44 @@ export async function getP2PUserProfile(userId) {
           },
         };
       }
+      // If not found locally either, return a fallback profile
+      return {
+        userId,
+        name: userId,
+        phone: null,
+        meta: {
+          displayName: userId,
+          fullName: userId,
+        },
+      };
     }
 
-    throw error;
+    // For other errors, log and return fallback
+    console.warn(`⚠️ Failed to get user ${userId} from Chat3:`, error.message);
+    const localUser = await User.findOne({ userId }).lean().exec();
+    if (localUser) {
+      return {
+        userId: localUser.userId,
+        name: localUser.name,
+        phone: localUser.phone,
+        meta: {
+          displayName: localUser.name,
+          fullName: localUser.name,
+          phone: localUser.phone,
+        },
+      };
+    }
+    
+    // Final fallback
+    return {
+      userId,
+      name: userId,
+      phone: null,
+      meta: {
+        displayName: userId,
+        fullName: userId,
+      },
+    };
   }
 }
 
