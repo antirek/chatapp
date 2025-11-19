@@ -128,9 +128,17 @@ class Chat3Client {
 
   /**
    * Add member to dialog
+   * @param {string} dialogId - Dialog ID
+   * @param {string} userId - User ID
+   * @param {object} options - Optional: type, name
    */
-  async addDialogMember(dialogId, userId) {
-    const response = await this.client.post(`/dialogs/${dialogId}/members/${userId}/add`);
+  async addDialogMember(dialogId, userId, options = {}) {
+    const payload = {
+      userId,
+      ...(options.type && { type: options.type }),
+      ...(options.name && { name: options.name }),
+    };
+    const response = await this.client.post(`/dialogs/${dialogId}/members/add`, payload);
     return response.data;
   }
 

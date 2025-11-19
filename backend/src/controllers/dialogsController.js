@@ -6,6 +6,9 @@ import {
 } from '../utils/p2pPersonalization.js';
 import { resolveNameFromMeta } from '../utils/nameResolver.js';
 import Contact from '../models/Contact.js';
+import User from '../models/User.js';
+import Bot from '../models/Bot.js';
+import { extractUserType } from '../utils/userTypeExtractor.js';
 // import { authenticate } from '../middleware/auth.js';
 
 const MIN_SEARCH_LENGTH = 2;
@@ -135,6 +138,80 @@ export async function resolveUserName(userId, fallbackName) {
   } catch (error) {
     console.warn(`Failed to resolve user ${userId}:`, error.message);
     return fallbackName || userId;
+  }
+}
+
+/**
+ * Get user info (type, name) for adding to dialog
+ * @param {string} userId - User ID
+ * @returns {Promise<{type: string, name: string}>}
+ */
+async function getUserInfoForDialog(userId) {
+  try {
+    // Check if it's a bot
+    if (userId.startsWith('bot_')) {
+      const bot = await Bot.findOne({ botId: userId }).select('botId name type').lean();
+      if (bot) {
+        return {
+          type: 'bot',
+          name: bot.name,
+        };
+      }
+    }
+
+    // Check if it's a contact
+    if (userId.startsWith('cnt_')) {
+      const contact = await Contact.findOne({ contactId: userId }).select('contactId name').lean();
+      if (contact) {
+        return {
+          type: 'contact',
+          name: contact.name,
+        };
+      }
+    }
+
+    // Check if it's a regular user
+    const user = await User.findOne({ userId }).select('userId name').lean();
+    if (user) {
+      // Try to get type from Chat3 API
+      try {
+        const chat3User = await Chat3Client.getUser(userId);
+        const chat3UserData = chat3User.data || chat3User;
+        return {
+          type: chat3UserData.type || 'user',
+          name: user.name,
+        };
+      } catch (error) {
+        // Fallback to default type
+        return {
+          type: 'user',
+          name: user.name,
+        };
+      }
+    }
+
+    // Fallback: try to get from Chat3 API
+    try {
+      const chat3User = await Chat3Client.getUser(userId);
+      const chat3UserData = chat3User.data || chat3User;
+      return {
+        type: chat3UserData.type || extractUserType(userId),
+        name: chat3UserData.name || userId,
+      };
+    } catch (error) {
+      // Final fallback
+      return {
+        type: extractUserType(userId),
+        name: userId,
+      };
+    }
+  } catch (error) {
+    console.warn(`Failed to get user info for ${userId}:`, error.message);
+    // Fallback
+    return {
+      type: extractUserType(userId),
+      name: userId,
+    };
   }
 }
 
@@ -517,7 +594,11 @@ export async function createDialog(req, res) {
     const dialogId = dialog.data.dialogId || dialog.data._id;
 
     // Add creator as member with memberType=user
-    await Chat3Client.addDialogMember(dialogId, req.user.userId);
+    const creatorInfo = await getUserInfoForDialog(req.user.userId);
+    await Chat3Client.addDialogMember(dialogId, req.user.userId, {
+      type: creatorInfo.type,
+      name: creatorInfo.name,
+    });
     try {
       await Chat3Client.setMeta(
         'dialogMember',
@@ -550,7 +631,11 @@ export async function createDialog(req, res) {
 
     // Add other members with memberType=user
     for (const memberId of memberIds) {
-      await Chat3Client.addDialogMember(dialogId, memberId);
+      const memberInfo = await getUserInfoForDialog(memberId);
+      await Chat3Client.addDialogMember(dialogId, memberId, {
+        type: memberInfo.type,
+        name: memberInfo.name,
+      });
       try {
         await Chat3Client.setMeta(
           'dialogMember',
@@ -748,7 +833,11 @@ export async function joinPublicDialog(req, res) {
 
     console.log(`🔵 [joinPublicDialog] Step 2: Adding user ${currentUserId} to dialog ${dialogId}...`);
     try {
-      await Chat3Client.addDialogMember(dialogId, currentUserId);
+      const userInfo = await getUserInfoForDialog(currentUserId);
+      await Chat3Client.addDialogMember(dialogId, currentUserId, {
+        type: userInfo.type,
+        name: userInfo.name,
+      });
       console.log(`✅ [joinPublicDialog] Step 2: Successfully added user to dialog`);
     } catch (error) {
       // Check if user is already a member
@@ -995,7 +1084,11 @@ export async function addDialogMember(req, res) {
       });
     }
 
-    await Chat3Client.addDialogMember(dialogId, userId);
+    const userInfo = await getUserInfoForDialog(userId);
+    await Chat3Client.addDialogMember(dialogId, userId, {
+      type: userInfo.type,
+      name: userInfo.name,
+    });
     try {
       await Chat3Client.setMeta(
         'dialogMember',

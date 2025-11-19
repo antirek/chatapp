@@ -102,7 +102,10 @@ export async function createBusinessContact(req, res) {
 
     // Add contact as member with memberType=contact
     try {
-      await Chat3Client.addDialogMember(dialogId, contact.contactId);
+      await Chat3Client.addDialogMember(dialogId, contact.contactId, {
+        type: 'contact',
+        name: contact.name,
+      });
       await Chat3Client.setMeta(
         'dialogMember',
         `${dialogId}:${contact.contactId}`,
@@ -117,7 +120,16 @@ export async function createBusinessContact(req, res) {
 
     // Add current user as member with memberType=user
     try {
-      await Chat3Client.addDialogMember(dialogId, currentUserId);
+      // Get user info for adding to dialog
+      const User = (await import('../models/User.js')).default;
+      const user = await User.findOne({ userId: currentUserId }).select('userId name').lean();
+      const userType = user ? 'user' : 'user'; // Default to 'user'
+      const userName = user?.name || currentUserId;
+      
+      await Chat3Client.addDialogMember(dialogId, currentUserId, {
+        type: userType,
+        name: userName,
+      });
       await Chat3Client.setMeta(
         'dialogMember',
         `${dialogId}:${currentUserId}`,
@@ -348,7 +360,16 @@ export async function getOrCreateContactDialog(req, res) {
 
           if (!isMember) {
             // Add user to dialog with memberType=user
-            await Chat3Client.addDialogMember(dialogId, currentUserId);
+            // Get user info for adding to dialog
+            const User = (await import('../models/User.js')).default;
+            const user = await User.findOne({ userId: currentUserId }).select('userId name').lean();
+            const userType = user ? 'user' : 'user';
+            const userName = user?.name || currentUserId;
+            
+            await Chat3Client.addDialogMember(dialogId, currentUserId, {
+              type: userType,
+              name: userName,
+            });
             await Chat3Client.setMeta(
               'dialogMember',
               `${dialogId}:${currentUserId}`,
@@ -408,7 +429,10 @@ export async function getOrCreateContactDialog(req, res) {
 
     // Add contact as member with memberType=contact
     try {
-      await Chat3Client.addDialogMember(dialogId, contact.contactId);
+      await Chat3Client.addDialogMember(dialogId, contact.contactId, {
+        type: 'contact',
+        name: contact.name,
+      });
       await Chat3Client.setMeta(
         'dialogMember',
         `${dialogId}:${contact.contactId}`,
@@ -422,7 +446,16 @@ export async function getOrCreateContactDialog(req, res) {
     }
 
     // Add current user as member with memberType=user
-    await Chat3Client.addDialogMember(dialogId, currentUserId);
+    // Get user info for adding to dialog
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findOne({ userId: currentUserId }).select('userId name').lean();
+    const userType = user ? 'user' : 'user';
+    const userName = user?.name || currentUserId;
+    
+    await Chat3Client.addDialogMember(dialogId, currentUserId, {
+      type: userType,
+      name: userName,
+    });
     await Chat3Client.setMeta(
       'dialogMember',
       `${dialogId}:${currentUserId}`,

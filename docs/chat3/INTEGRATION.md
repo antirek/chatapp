@@ -76,7 +76,7 @@
 |-----------|----------|----------|-----------------|
 | Tenants | `GET/POST/PUT/DELETE /tenants` | Управление организациями (редко используется внешними системами). | read/write/delete |
 | Dialogs | `GET /dialogs` | Список диалогов с фильтрами, сортировкой, пагинацией; участники не включаются, поле `memberCount` показывает количество участников. | read |
-| Dialogs | `POST /dialogs` | Создание диалога, указание участников и мета-тегов. | write |
+| Dialogs | `POST /dialogs` | Создание диалога с опциональным массивом участников (`members`) и мета-тегами. Участники автоматически создаются в коллекции `User`, если их нет. | write |
 | Dialogs | `GET /dialogs/:dialogId` | Детали диалога и мета-информация без списка участников; доступно поле `memberCount`. | read |
 | Dialogs | `GET /dialogs/:dialogId/members` | Пагинированный список участников диалога с фильтрами `queryParser` и `meta.*`. | read |
 | Dialogs | `DELETE /dialogs/:dialogId` | Удаление диалога. | delete |
@@ -88,7 +88,7 @@
 | Message Reactions | `GET /messages/:messageId/reactions` | Получение реакций. | read |
 | Message Reactions | `POST /messages/:messageId/reactions` | Добавление/обновление реакции. | write |
 | Message Reactions | `DELETE /messages/:messageId/reactions/:reactionId` | Удаление реакции. | delete |
-| Dialog Members | `POST /dialogs/:dialogId/members/:userId/add` | Добавление участника. | write |
+| Dialog Members | `POST /dialogs/:dialogId/members/add` | Добавление участника. `userId`, `type`, `name` передаются в теле запроса. Пользователь автоматически создается в коллекции `User`, если его нет. | write |
 | Dialog Members | `POST /dialogs/:dialogId/members/:userId/remove` | Удаление участника. | delete |
 | Dialog Members | `PATCH /dialogs/:dialogId/members/:userId/unread` | Принудительно уменьшить `unreadCount` (отметить сообщения прочитанными). | write |
 | Users | `GET /users` | Список пользователей; `includeDialogCount=true` добавляет счётчик диалогов; `filter` в формате `(поле,оператор,значение)` (через `queryParser`) поддерживает `userId`, `name`, `meta.*`. | read |
@@ -123,6 +123,55 @@
 - Примеры:
   - ✅ Допустимо: `usr_123`, `bot_456`, `carl`, `agent_789`
   - ❌ Недопустимо: `user.test`, `bot.example.com`, `usr.123`
+
+#### Создание диалога с участниками
+
+При создании диалога (`POST /dialogs`) можно сразу указать массив участников в поле `members`. Каждый участник должен содержать обязательное поле `userId` и опциональные поля `type` и `name`:
+
+```json
+{
+  "name": "VIP чат",
+  "createdBy": "agent_42",
+  "members": [
+    {
+      "userId": "carl",
+      "type": "user",
+      "name": "Carl Johnson"
+    },
+    {
+      "userId": "bot_123",
+      "type": "bot",
+      "name": "Support Bot"
+    }
+  ],
+  "meta": {
+    "channel": "whatsapp"
+  }
+}
+```
+
+**Автоматическое создание пользователей:**
+- При создании диалога с участниками или при добавлении участника система автоматически проверяет существование пользователя в коллекции `User`.
+- Если пользователь не существует, он создается автоматически с указанными полями (`userId`, `type`, `name`).
+- Если пользователь уже существует, опциональные поля (`type`, `name`) обновляются, если они предоставлены и отличаются от текущих значений.
+
+#### Добавление участника в диалог
+
+Для добавления участника используйте `POST /dialogs/:dialogId/members/add`. Формат запроса:
+
+```json
+{
+  "userId": "carl",
+  "type": "user",
+  "name": "Carl Johnson"
+}
+```
+
+- `userId` — обязательное поле (ID пользователя).
+- `type` — опциональное поле (тип пользователя: `user`, `bot`, `contact` и т.д.).
+- `name` — опциональное поле (имя пользователя).
+
+Пользователь автоматически создается в коллекции `User`, если его нет.
 
 #### Получение участников диалога
 

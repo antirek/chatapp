@@ -229,19 +229,19 @@ class RabbitMQConsumer {
         exclusive: false,
       });
 
-      // Bind to exchange with routing key for all user events
+      // Bind to exchange with routing key for contact events
       // New format: user.{type}.{userId}.{updateType}
-      // Pattern: user.# - matches all events for all users of all types
-      // For message sender worker, we need all contacts (cnt_*) updates
-      // Using user.cnt.# to match all contacts, or user.# for all users
+      // Pattern: user.contact.# - matches all events for all contacts
+      // Message sender worker processes messages sent to business contacts (cnt_*)
+      // Contacts have type='contact' in Chat3, so routing key is user.contact.cnt_xxx.*
       await this.channel.bindQueue(
         queueName,
         config.rabbitmq.updatesExchange,
-        'user.#' // Matches all events for all users of all types (topic exchange wildcard)
+        'user.contact.#' // Matches all events for all contacts (topic exchange wildcard)
       );
 
       console.log(`📤 Created global message queue: ${queueName}`);
-      console.log(`   Routing: user.# (all users of all types)`);
+      console.log(`   Routing: user.contact.# (all contacts)`);
 
       // Start consuming messages for message sender worker
       const { consumerTag } = await this.channel.consume(
