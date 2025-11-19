@@ -200,6 +200,12 @@ class BotWorker {
         return;
       }
 
+      // Skip system messages
+      if (senderId === 'system' || (message.type && (message.type === 'system' || message.type.startsWith('system.')))) {
+        console.log(`⏭️  Message ${messageId} is a system message (senderId: ${senderId}, type: ${message.type}), skipping`);
+        return;
+      }
+
       // Mark message as processed
       this.processedMessages.add(messageId);
 

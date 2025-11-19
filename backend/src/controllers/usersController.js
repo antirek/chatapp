@@ -7,63 +7,124 @@ export async function listUsers(req, res) {
     const { search, limit = 50, page = 1 } = req.query;
     const currentUserId = req.user.userId;
 
-    const query = {
+    const limitNum = parseInt(limit, 10);
+    const pageNum = parseInt(page, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get users
+    const userQuery = {
       userId: { $ne: currentUserId },
     };
 
     if (search) {
-      query.$or = [
+      userQuery.$or = [
         { name: { $regex: search, $options: 'i' } },
         { phone: { $regex: search, $options: 'i' } },
       ];
     }
 
-    const limitNum = parseInt(limit, 10);
-    const pageNum = parseInt(page, 10);
-    const skip = (pageNum - 1) * limitNum;
-
-    // Get total count for pagination
-    const total = await User.countDocuments(query);
-
-    const users = await User.find(query)
+    // Get users (fetch more to account for bots in combined list)
+    const users = await User.find(userQuery)
       .select('userId name phone createdAt lastActiveAt')
-      .skip(skip)
-      .limit(limitNum)
+      .limit(limitNum * 3) // Get more to account for bots
       .sort({ lastActiveAt: -1, createdAt: -1 });
 
-    const usersWithAvatars = await Promise.all(
-      users.map(async (user) => {
-        let avatar = null;
-        try {
-          const chat3User = await Chat3Client.getUser(user.userId);
-          const chat3UserData = chat3User.data || chat3User;
-          avatar =
-            chat3UserData.meta?.avatar?.value ||
-            chat3UserData.meta?.avatar ||
-            chat3UserData.avatar ||
-            null;
-        } catch (error) {
-          if (error.response?.status !== 404) {
-            console.warn(`Failed to get avatar for user ${user.userId}:`, error.message);
-          }
+    // Get bots
+    const botQuery = {
+      isActive: true,
+    };
+
+    if (search) {
+      botQuery.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { botId: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const bots = await Bot.find(botQuery)
+      .select('botId name description type handler createdAt updatedAt')
+      .limit(limitNum * 3) // Get more to account for users
+      .sort({ createdAt: -1 });
+
+    // Combine users and bots, then sort and paginate
+    const allItems = [];
+
+    // Add users
+    for (const user of users) {
+      let avatar = null;
+      try {
+        const chat3User = await Chat3Client.getUser(user.userId);
+        const chat3UserData = chat3User.data || chat3User;
+        avatar =
+          chat3UserData.meta?.avatar?.value ||
+          chat3UserData.meta?.avatar ||
+          chat3UserData.avatar ||
+          null;
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.warn(`Failed to get avatar for user ${user.userId}:`, error.message);
         }
+      }
 
-        return {
-          userId: user.userId,
-          name: user.name,
-          phone: user.phone,
-          avatar,
-          createdAt: user.createdAt,
-          lastActiveAt: user.lastActiveAt,
-        };
-      }),
-    );
+      allItems.push({
+        userId: user.userId,
+        name: user.name,
+        phone: user.phone,
+        avatar,
+        createdAt: user.createdAt,
+        lastActiveAt: user.lastActiveAt,
+        isBot: false,
+      });
+    }
 
+    // Add bots
+    for (const bot of bots) {
+      let avatar = null;
+      try {
+        const chat3User = await Chat3Client.getUser(bot.botId);
+        const chat3UserData = chat3User.data || chat3User;
+        avatar =
+          chat3UserData.meta?.avatar?.value ||
+          chat3UserData.meta?.avatar ||
+          chat3UserData.avatar ||
+          null;
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.warn(`Failed to get avatar for bot ${bot.botId}:`, error.message);
+        }
+      }
+
+      allItems.push({
+        userId: bot.botId,
+        name: bot.name,
+        phone: null,
+        avatar,
+        description: bot.description,
+        isBot: true,
+        botType: bot.type,
+        handler: bot.handler,
+        createdAt: bot.createdAt,
+        lastActiveAt: bot.updatedAt,
+      });
+    }
+
+    // Sort combined list by lastActiveAt or createdAt (newest first)
+    allItems.sort((a, b) => {
+      const aTime = a.lastActiveAt || a.createdAt || 0;
+      const bTime = b.lastActiveAt || b.createdAt || 0;
+      return bTime - aTime;
+    });
+
+    // Apply pagination to combined list
+    const paginatedItems = allItems.slice(skip, skip + limitNum);
+    const totalUsers = await User.countDocuments(userQuery);
+    const totalBots = await Bot.countDocuments(botQuery);
+    const total = totalUsers + totalBots;
     const totalPages = Math.ceil(total / limitNum);
 
     return res.json({
       success: true,
-      data: usersWithAvatars,
+      data: paginatedItems,
       pagination: {
         page: pageNum,
         limit: limitNum,

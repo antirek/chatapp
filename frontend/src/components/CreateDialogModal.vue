@@ -58,9 +58,16 @@
             <div class="flex-1 min-w-0">
               <div class="font-medium text-gray-900 truncate">
                 {{ user.name }}
+                <span v-if="user.isBot" class="ml-2 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Бот</span>
               </div>
-              <div class="text-sm text-gray-500 truncate">
+              <div v-if="user.phone" class="text-sm text-gray-500 truncate">
                 {{ formatPhone(user.phone) }}
+              </div>
+              <div v-else-if="user.description" class="text-sm text-gray-500 truncate">
+                {{ user.description }}
+              </div>
+              <div v-else-if="user.isBot" class="text-sm text-gray-500 truncate">
+                Бот
               </div>
             </div>
 
@@ -101,8 +108,10 @@ import api from '@/services/api'
 interface User {
   userId: string
   name: string
-  phone: string
+  phone: string | null
   avatar?: string | null
+  isBot?: boolean
+  description?: string
 }
 
 const props = defineProps<{
