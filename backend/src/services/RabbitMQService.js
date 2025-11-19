@@ -1,6 +1,7 @@
 import amqp from 'amqplib';
 import config from '../config/index.js';
-import { generateUserRoutingKey } from '../utils/userTypeExtractor.js';
+import { extractUserType, generateUserRoutingKey } from '../utils/userTypeExtractor.js';
+import Chat3Client from './Chat3Client.js';
 
 /**
  * RabbitMQ Service for consuming Chat3 updates
@@ -101,9 +102,27 @@ class RabbitMQService {
         exclusive: false,
       });
 
+      // Get user type from Chat3 API (recommended) or fallback to prefix
+      let userType = extractUserType(userId); // Fallback: extract from prefix
+      try {
+        const userResponse = await Chat3Client.getUser(userId);
+        const userData = userResponse.data || userResponse;
+        if (userData.type) {
+          userType = userData.type; // Use type from Chat3 DB
+          if (config.nodeEnv === 'development') {
+            console.log(`📋 User ${userId} type from Chat3: ${userType}`);
+          }
+        }
+      } catch (error) {
+        // If user not found in Chat3, use fallback (prefix extraction)
+        if (config.nodeEnv === 'development') {
+          console.log(`⚠️  User ${userId} not found in Chat3, using type from prefix: ${userType}`);
+        }
+      }
+      
       // Bind queue to exchange with routing key: user.{type}.{userId}.*
       // New format: user.{type}.{userId}.{updateType}
-      const routingKey = generateUserRoutingKey(userId, '*');
+      const routingKey = `user.${userType}.${userId}.*`;
       await this.channel.bindQueue(queue.queue, config.rabbitmq.updatesExchange, routingKey);
 
       console.log(`📬 User ${userId} subscribed to updates`);

@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Bot from '../models/Bot.js';
 import Chat3Client from '../services/Chat3Client.js';
 
 export async function listUsers(req, res) {
@@ -305,6 +306,34 @@ export async function deleteCurrentUserAvatar(req, res) {
 export async function getUserById(req, res) {
   try {
     const { userId } = req.params;
+
+    // Check if it's a bot
+    if (userId && userId.startsWith('bot_')) {
+      const bot = await Bot.findOne({ botId: userId }).select('botId name description type handler isActive createdAt updatedAt');
+      
+      if (!bot) {
+        return res.status(404).json({
+          success: false,
+          error: 'Bot not found',
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          userId: bot.botId,
+          name: bot.name,
+          phone: null,
+          avatar: null,
+          description: bot.description,
+          type: bot.type,
+          handler: bot.handler,
+          isBot: true,
+          createdAt: bot.createdAt,
+          lastActiveAt: bot.updatedAt,
+        },
+      });
+    }
 
     const user = await User.findOne({ userId }).select('userId name phone createdAt lastActiveAt');
 

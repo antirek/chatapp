@@ -195,6 +195,44 @@ class BotService {
         console.log('ℹ️  System bot bot_echo already exists');
       }
 
+      // Ensure bot exists in Chat3 as a user with type 'bot'
+      try {
+        const botUserId = echoBot.botId; // bot_echo
+        console.log(`🔵 Checking if bot ${botUserId} exists in Chat3...`);
+        
+        try {
+          const existingUser = await Chat3Client.getUser(botUserId);
+          console.log(`✅ Bot ${botUserId} already exists in Chat3`);
+          
+          // Check if type is set correctly
+          const userData = existingUser.data || existingUser;
+          if (userData.type !== 'bot') {
+            console.log(`🔵 Updating bot ${botUserId} type to 'bot' in Chat3...`);
+            await Chat3Client.updateUser(botUserId, { type: 'bot' });
+            console.log(`✅ Updated bot ${botUserId} type to 'bot'`);
+          }
+        } catch (error) {
+          if (error.response?.status === 404) {
+            console.log(`🔵 Creating bot ${botUserId} in Chat3 as user with type 'bot'...`);
+            await Chat3Client.createUser(botUserId, {
+              name: echoBot.name,
+              type: 'bot',
+              meta: {
+                description: echoBot.description,
+                handler: echoBot.handler,
+                botType: echoBot.type, // system
+              },
+            });
+            console.log(`✅ Created bot ${botUserId} in Chat3 with type 'bot'`);
+          } else {
+            throw error;
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Failed to create/update bot ${echoBot.botId} in Chat3:`, error.message);
+        // Don't throw - bot can still work without Chat3 user
+      }
+
       return echoBot;
     } catch (error) {
       console.error('❌ Error initializing system bots:', error.message);

@@ -2,6 +2,7 @@ import amqp from 'amqplib';
 import config from '../config/index.js';
 import messageSenderWorker from '../workers/messageSender.js';
 import { extractUserType, generateUserRoutingKey } from '../utils/userTypeExtractor.js';
+import Chat3Client from './Chat3Client.js';
 
 /**
  * RabbitMQ Consumer для получения Updates от Chat3
@@ -86,8 +87,23 @@ class RabbitMQConsumer {
 
     try {
       const queueName = `user_${userId}_updates`;
+      
+      // Get user type from Chat3 API (recommended) or fallback to prefix
+      let userType = extractUserType(userId); // Fallback: extract from prefix
+      try {
+        const userResponse = await Chat3Client.getUser(userId);
+        const userData = userResponse.data || userResponse;
+        if (userData.type) {
+          userType = userData.type; // Use type from Chat3 DB
+          console.log(`📋 User ${userId} type from Chat3: ${userType}`);
+        }
+      } catch (error) {
+        // If user not found in Chat3, use fallback (prefix extraction)
+        console.log(`⚠️  User ${userId} not found in Chat3, using type from prefix: ${userType}`);
+      }
+      
       // New format: user.{type}.{userId}.*
-      const routingKey = generateUserRoutingKey(userId, '*');
+      const routingKey = `user.${userType}.${userId}.*`;
 
       // Создать очередь (сохраняется 1 час для краткосрочных отключений)
       await this.channel.assertQueue(queueName, {

@@ -128,6 +128,18 @@ async function loadUserInfo() {
       if (membersResponse.success && membersResponse.data && Array.isArray(membersResponse.data)) {
         const otherMember = membersResponse.data.find((m: any) => m.userId !== currentUserId)
         if (otherMember) {
+          // Skip API request for bots and business contacts
+          if (otherMember.userId?.startsWith('bot_') || otherMember.userId?.startsWith('cnt_')) {
+            user.value = {
+              userId: otherMember.userId,
+              name: otherMember.name || otherMember.userName || otherMember.userId,
+              phone: otherMember.userId.startsWith('cnt_') ? otherMember.phone : null,
+              avatar: otherMember.avatar || null,
+            }
+            isLoading.value = false
+            return
+          }
+
           // Загружаем полную информацию о пользователе
           try {
             const userResponse = await api.getUser(otherMember.userId)

@@ -1041,6 +1041,22 @@ async function loadOtherUserInfo() {
           return
         }
 
+        // Skip API request for bots (bot_...) - they are handled separately
+        if (otherMember.userId && otherMember.userId.startsWith('bot_')) {
+          // This is a bot - use basic info from member data or botId
+          otherUser.value = {
+            userId: otherMember.userId,
+            name: otherMember.name || otherMember.userName || otherMember.userId.replace('bot_', ''),
+            phone: null,
+            avatar: otherMember.avatar || null,
+            isBot: true
+          }
+          if (otherUser.value.name) {
+            userNamesCache.value[otherMember.userId] = otherUser.value.name
+          }
+          return
+        }
+
         try {
           const userResponse = await api.getUser(otherMember.userId)
           if (userResponse.success && userResponse.data) {
