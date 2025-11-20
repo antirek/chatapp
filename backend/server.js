@@ -19,6 +19,7 @@ import messageRoutes from './src/routes/messages.js';
 import dialogMessageRoutes from './src/routes/dialogMessages.js';
 import userRoutes from './src/routes/users.js';
 import contactRoutes from './src/routes/contacts.js';
+import channelRoutes from './src/routes/channels.js';
 
 // Initialize Express app
 const app = express();
@@ -116,6 +117,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/dialog', dialogMessageRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/contacts', contactRoutes);
+app.use('/api/channels', channelRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {
