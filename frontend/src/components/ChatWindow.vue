@@ -610,18 +610,25 @@ function isOwnMessage(message: Message): boolean {
 }
 
 /**
- * Определяет тип участника по senderId или message.sender.type
+ * Определяет тип участника по senderId или message.sender.type / senderInfo.type
  * @returns 'user' | 'bot' | 'contact'
  */
 function getSenderType(message: Message): 'user' | 'bot' | 'contact' {
-  // Проверяем message.sender.type, если есть
+  // Приоритет 1: проверяем senderInfo.type (новый формат)
+  if (message.senderInfo?.type) {
+    if (message.senderInfo.type === 'contact') return 'contact'
+    if (message.senderInfo.type === 'bot') return 'bot'
+    if (message.senderInfo.type === 'user') return 'user'
+  }
+  
+  // Приоритет 2: проверяем message.sender.type
   if (message.sender?.type) {
     if (message.sender.type === 'contact') return 'contact'
     if (message.sender.type === 'bot') return 'bot'
     if (message.sender.type === 'user') return 'user'
   }
   
-  // Определяем по префиксу senderId
+  // Приоритет 3: определяем по префиксу senderId
   const senderId = message.senderId || ''
   if (senderId.startsWith('cnt_')) return 'contact'
   if (senderId.startsWith('bot_')) return 'bot'
@@ -823,13 +830,12 @@ function getSenderName(message: Message): string {
     props.dialog.meta?.contactId ||
     props.dialog.dialogId
 
-  if (isBusinessContact.value && message.senderId?.startsWith('cnt_')) {
-    return props.dialog.name || props.dialog.dialogName || 'Бизнес-контакт'
-  }
-
   const isOwn = isOwnMessage(message)
 
   if (isOwn) {
+    if (message.senderInfo?.name) {
+      return message.senderInfo.name
+    }
     if (message.sender?.name) {
       return message.sender.name
     }
@@ -841,34 +847,62 @@ function getSenderName(message: Message): string {
     return message.senderId
   }
 
+  // Приоритет 1: имя из senderInfo (новый формат от API) - самый надежный источник
+  if (message.senderInfo?.name) {
+    // Кэшируем имя для будущего использования
+    if (message.senderId) {
+      userNamesCache.value[message.senderId] = message.senderInfo.name
+    }
+    return message.senderInfo.name
+  }
+
+  // Приоритет 2: имя из объекта sender сообщения
   if (message.sender?.name) {
+    // Кэшируем имя для будущего использования
+    if (message.senderId) {
+      userNamesCache.value[message.senderId] = message.sender.name
+    }
     return message.sender.name
   }
 
+  // Приоритет 3: для бизнес-контактов (если senderId начинается с cnt_ и нет senderInfo)
+  if (isBusinessContact.value && message.senderId?.startsWith('cnt_')) {
+    return props.dialog.name || props.dialog.dialogName || 'Бизнес-контакт'
+  }
+
+  // Приоритет 4: кэш имен пользователей
   if (userNamesCache.value[message.senderId]) {
     return userNamesCache.value[message.senderId]
   }
 
+  // Приоритет 5: для бизнес-контактов (коллеги в personal_contact диалогах)
   if (isBusinessContact.value && message.senderId && !message.senderId.startsWith('cnt_')) {
     return resolveUserNameFromMessage(message)
   }
 
-  if (userNamesCache.value[message.senderId]) {
-    return userNamesCache.value[message.senderId]
-  }
-
-  if (message.senderId === otherUser.value?.userId && otherUser.value?.name) {
+  // Приоритет 6: otherUser для p2p диалогов (только если senderId совпадает)
+  if (isP2PDialog.value && message.senderId === otherUser.value?.userId && otherUser.value?.name) {
     return otherUser.value.name
   }
 
-  if (isP2PDialog.value && p2pNameForCurrent.value) {
+  // Приоритет 7: p2pNameForCurrent для p2p диалогов (только если senderId совпадает с собеседником)
+  if (isP2PDialog.value && p2pNameForCurrent.value && message.senderId === otherUser.value?.userId) {
     return p2pNameForCurrent.value
+  }
+
+  // Fallback: пытаемся загрузить имя асинхронно
+  if (message.senderId && !message.senderId.startsWith('cnt_') && !message.senderId.startsWith('bot_')) {
+    void fetchUserName(message.senderId)
   }
 
   return message.senderId
 }
 
 function resolveUserNameFromMessage(message: Message): string {
+  if (message.senderInfo?.name) {
+    return message.senderInfo.name
+  }
+  
   if (message.sender?.name) {
     return message.sender.name
   }
@@ -897,7 +931,13 @@ function getSenderAvatar(message: Message): string | null {
       return userAvatars.value[message.senderId]
     }
     
-    // Priority 2: Check if message has sender object with avatar (from Chat3 API)
+    // Priority 2: Check senderInfo (новый формат)
+    if (message.senderInfo?.avatar) {
+      userAvatars.value[message.senderId] = message.senderInfo.avatar
+      return message.senderInfo.avatar
+    }
+    
+    // Priority 3: Check if message has sender object with avatar (from Chat3 API)
     if (message.sender?.avatar) {
       userAvatars.value[message.senderId] = message.sender.avatar
       return message.sender.avatar
@@ -907,7 +947,13 @@ function getSenderAvatar(message: Message): string | null {
   }
   
   // For other user's messages
-  // Priority 1: Check if message has sender object with avatar (from Chat3 API)
+  // Priority 1: Check senderInfo (новый формат)
+  if (message.senderInfo?.avatar !== undefined) {
+    userAvatars.value[message.senderId] = message.senderInfo.avatar
+    return message.senderInfo.avatar
+  }
+  
+  // Priority 2: Check if message has sender object with avatar (from Chat3 API)
   if (message.sender?.avatar) {
     userAvatars.value[message.senderId] = message.sender.avatar
     return message.sender.avatar

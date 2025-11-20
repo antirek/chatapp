@@ -85,6 +85,15 @@ export interface Message {
     phone?: string
     [key: string]: any
   }
+  senderInfo?: {
+    userId: string
+    name?: string
+    phone?: string
+    avatar?: string | null
+    type?: 'user' | 'bot' | 'contact'
+    lastActiveAt?: string | number
+    [key: string]: any
+  }
   content?: string
   type: string
   reactionCounts?: Record<string, number>
