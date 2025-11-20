@@ -45,11 +45,11 @@ const botSchema = new mongoose.Schema({
     default: true,
     index: true,
   },
-  // Bot handler type (echo, command, ai, etc.)
+  // Bot handler type (echo, command, ai, classify, etc.)
   handler: {
     type: String,
     required: true,
-    enum: ['echo', 'command', 'ai'],
+    enum: ['echo', 'command', 'ai', 'classify'],
     default: 'echo',
   },
   // Settings specific to bot type

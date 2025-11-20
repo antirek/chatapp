@@ -695,7 +695,17 @@ function getNormalizedType(message: Message): string {
 }
 
 function isSystemNotification(message: Message): boolean {
-  return getNormalizedType(message) === 'system'
+  // Check type for system messages (system.* types)
+  const normalizedType = getNormalizedType(message)
+  const isSystemType = normalizedType === 'system' || normalizedType === 'system.notification' || normalizedType === 'system.event'
+  
+  // Also check meta.isSystemMessage flag
+  const isSystemMeta = message.meta?.isSystemMessage === true
+  
+  // Check senderId as fallback (for backward compatibility)
+  const isSystemSender = message.senderId === 'system'
+  
+  return isSystemType || isSystemMeta || isSystemSender
 }
 
 function isImageMessage(message: Message): boolean {

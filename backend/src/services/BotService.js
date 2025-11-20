@@ -105,17 +105,33 @@ class BotService {
             await Chat3Client.setMeta('dialog', dialogId, 'classifyStatus', { value: 'end' });
             
             // Add system message
-            await Chat3Client.createMessage(dialogId, {
-              content: `классифицировано как: ${classification}`,
-              type: mapOutgoingMessageType('system'),
-              senderId: 'system',
-              meta: {
-                classification,
-                classifiedBy: bot.botId,
-                command: true,
-              },
-            });
-            console.log(`✅ [Classify Bot] Added system message "классифицировано как: ${classification}"`);
+            // Use bot_classify as senderId instead of 'system' - Chat3 may require a real userId
+            const systemMessageType = mapOutgoingMessageType('system');
+            console.log(`📝 [Classify Bot] Creating system message with type: ${systemMessageType}, senderId: ${bot.botId}`);
+            try {
+              const systemMessageResult = await Chat3Client.createMessage(dialogId, {
+                content: `классифицировано как: ${classification}`,
+                type: systemMessageType,
+                senderId: bot.botId, // Use bot ID instead of 'system'
+                meta: {
+                  classification,
+                  classifiedBy: bot.botId,
+                  command: true,
+                  isSystemMessage: true, // Mark as system message in meta
+                },
+              });
+              console.log(`✅ [Classify Bot] Added system message "классифицировано как: ${classification}"`);
+              console.log(`📋 [Classify Bot] System message result:`, {
+                messageId: systemMessageResult?.data?.messageId || systemMessageResult?.messageId || systemMessageResult?.data?._id,
+                type: systemMessageType,
+                dialogId,
+                fullResponse: systemMessageResult,
+              });
+            } catch (systemMsgError) {
+              console.error(`❌ [Classify Bot] Failed to create system message:`, systemMsgError);
+              console.error(`   Error details:`, systemMsgError.response?.data || systemMsgError.message);
+              // Don't throw - classification meta tags are already set
+            }
             
             // Return null - only system message, no user-visible response
             return null;
