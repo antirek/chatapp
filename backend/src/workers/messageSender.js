@@ -1,6 +1,7 @@
 import Channel from '../models/Channel.js';
 import Service from '../models/Service.js';
 import Contact from '../models/Contact.js';
+
 import Chat3Client from '../services/Chat3Client.js';
 import { WhatsAppApiClient } from '../services/whatsapp-api-client.js';
 import { normalizeChat3Update } from '../utils/updateNormalizer.js';
@@ -79,11 +80,14 @@ class MessageSenderWorker {
         return;
       }
 
-      // Check if this is an outgoing message from a user
+      // Check if this is an outgoing message from a user or bot (bot_classify)
       const senderId = message.senderId;
-      if (!senderId || !senderId.startsWith('usr_')) {
-        // Not from a user, skip
-        console.log(`⏭️  Message ${messageId} is not from a user (senderId: ${senderId})`);
+      const isFromUser = senderId && senderId.startsWith('usr_');
+      const isFromClassifyBot = senderId === 'bot_classify';
+      
+      if (!isFromUser && !isFromClassifyBot) {
+        // Not from a user or classify bot, skip
+        console.log(`⏭️  Message ${messageId} is not from a user or classify bot (senderId: ${senderId})`);
         return;
       }
 

@@ -110,20 +110,16 @@ export async function receiveChannelMessage(req, res) {
 
     try {
       // Search for existing dialog with this contactId
-      // Try to find dialog by searching through user dialogs
-      // First, find a user with this accountId to search their dialogs
-      const user = await User.findOne({ accountId }).select('userId name').lean();
-      
-      if (user) {
-        // Search user's dialogs
-        const dialogsResponse = await Chat3Client.getUserDialogs(user.userId, {
+      // Contact is a member of the dialog, so we can search dialogs directly via contact
+      try {
+        const dialogsResponse = await Chat3Client.getUserDialogs(contactId, {
           page: 1,
           limit: 100,
         });
 
         const allDialogs = dialogsResponse?.data || dialogsResponse || [];
         
-        // Filter dialogs by contactId meta tag
+        // Filter dialogs by contactId meta tag to ensure it's the right dialog
         const dialogs = allDialogs.filter(dialog => {
           const dialogContactId = dialog.meta?.contactId?.value || dialog.meta?.contactId;
           return dialogContactId === contactId;
@@ -134,15 +130,21 @@ export async function receiveChannelMessage(req, res) {
           const existingDialog = dialogs[0];
           dialogId = existingDialog.dialogId || existingDialog._id;
           console.log(`✅ Found existing dialog ${dialogId} for contact ${contactId}`);
+        } else {
+          console.log(`ℹ️  No existing dialog found for contact ${contactId}, will create new one`);
         }
+      } catch (contactDialogError) {
+        // If contact doesn't have dialogs yet or error occurred, will create new dialog
+        console.log(`ℹ️  Could not search dialogs for contact ${contactId}:`, contactDialogError.message);
+        console.log(`   Will create new dialog`);
       }
       
       if (!dialogId) {
         // Dialog doesn't exist, create new one
         console.log(`📝 Creating new dialog for contact ${contactId}`);
         
-        // Use user found above or find first user with this accountId to use as createdBy
-        const createdByUser = user || await User.findOne({ accountId }).select('userId name').lean();
+        // Find first user with this accountId to use as createdBy
+        const createdByUser = await User.findOne({ accountId }).select('userId name').lean();
         const createdBy = createdByUser?.userId || accountId; // Fallback to accountId if no user found
         
         const dialogName = contact.name;
@@ -154,6 +156,7 @@ export async function receiveChannelMessage(req, res) {
             type: { value: 'personal_contact' },
             contactId: { value: contact.contactId },
             contactName: { value: contact.name },
+            classifyStatus: { value: 'init' },
           },
         });
         
@@ -168,7 +171,19 @@ export async function receiveChannelMessage(req, res) {
 
         console.log(`✅ Created dialog ${dialogId} for contact ${contactId}`);
 
-        // Add contact as member with type=contact
+        // Step 1: Add system message "Начат диалог"
+        try {
+          await Chat3Client.createMessage(dialogId, {
+            content: 'Начат диалог',
+            type: mapOutgoingMessageType('system'),
+            senderId: 'system',
+          });
+          console.log(`✅ Added system message "Начат диалог" to dialog ${dialogId}`);
+        } catch (systemMsgError) {
+          console.error('⚠️ Failed to add system message:', systemMsgError);
+        }
+
+        // Step 2: Add contact as member with type=contact
         try {
           await Chat3Client.addDialogMember(dialogId, contact.contactId, {
             type: 'contact',
@@ -186,8 +201,42 @@ export async function receiveChannelMessage(req, res) {
           // Continue - dialog is created, we can still add message
         }
 
+        // Step 3: Add bot_classify to dialog for classification
+        try {
+          await Chat3Client.addDialogMember(dialogId, 'bot_classify', {
+            type: 'bot',
+            name: 'Classify',
+          });
+          await Chat3Client.setMeta(
+            'dialogMember',
+            `${dialogId}:bot_classify`,
+            'memberType',
+            { value: 'bot' }
+          );
+          console.log(`✅ Added bot_classify to dialog ${dialogId} for classification`);
+        } catch (botMemberError) {
+          console.error('⚠️ Failed to add bot_classify as member:', botMemberError);
+          // Continue - dialog is created, we can still add message
+        }
+
+        // Step 4: Add system message "Подключен bot_classify"
+        try {
+          await Chat3Client.createMessage(dialogId, {
+            content: 'Подключен bot_classify',
+            type: mapOutgoingMessageType('system'),
+            senderId: 'system',
+          });
+          console.log(`✅ Added system message "Подключен bot_classify" to dialog ${dialogId}`);
+        } catch (systemMsgError) {
+          console.error('⚠️ Failed to add system message:', systemMsgError);
+        }
+
+        // Step 5: Bot sends clarification message (will be sent via messageSender worker to channel)
+        // This message will be created after contact message is added, so bot can respond
+        // The bot will send it automatically when it receives the first message
+
         // Note: Users are NOT automatically added to the dialog when receiving incoming messages.
-        // Users will be added when they open the dialog via getOrCreateContactDialog endpoint.
+        // Users will be added after classification via bot_classify.
       }
     } catch (dialogError) {
       console.error('❌ Error finding/creating dialog:', dialogError);
