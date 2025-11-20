@@ -988,6 +988,64 @@ export async function deleteDialog(req, res) {
   }
 }
 
+/**
+ * Get bot commands for a dialog
+ * Returns list of bots in dialog with their commands
+ */
+export async function getDialogBotCommands(req, res) {
+  try {
+    const { dialogId } = req.params;
+    
+    if (!dialogId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dialog ID is required',
+      });
+    }
+
+    // Get dialog members
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 100 });
+    const members = extractMembersFromResponse(membersResponse);
+    
+    // Filter bots (userId starts with 'bot_')
+    const bots = members.filter(member => member.userId && member.userId.startsWith('bot_'));
+    
+    // Get bot commands from MongoDB
+    const Bot = (await import('../models/Bot.js')).default;
+    const botCommands = [];
+    
+    for (const bot of bots) {
+      try {
+        const botData = await Bot.findOne({ botId: bot.userId, isActive: true })
+          .select('botId name commands')
+          .lean();
+        
+        if (botData && botData.commands && botData.commands.length > 0) {
+          botCommands.push({
+            botId: botData.botId,
+            name: botData.name,
+            commands: botData.commands,
+          });
+        }
+      } catch (error) {
+        console.warn(`Failed to get commands for bot ${bot.userId}:`, error.message);
+        // Continue with other bots
+      }
+    }
+    
+    return res.json({
+      success: true,
+      data: botCommands,
+    });
+  } catch (error) {
+    console.error('Error getting dialog bot commands:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get bot commands',
+    });
+  }
+}
+
 export async function getDialogMembers(req, res) {
   try {
     const { dialogId } = req.params;

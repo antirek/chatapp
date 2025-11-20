@@ -59,6 +59,15 @@ export async function initializeWebSocket(server) {
         const envelope = normalizedUpdate.data || {};
 
         console.log(`➡️  Sending update to ${socket.userId}:`, eventType);
+        if (eventType === 'message.create' || eventType?.startsWith('message.')) {
+          console.log(`📨 [WebSocket] Message update details:`, {
+            eventType,
+            dialogId: normalizedUpdate.dialogId,
+            messageId: envelope.message?.messageId || envelope.message?._id,
+            senderId: envelope.message?.senderId,
+            content: envelope.message?.content?.substring(0, 50),
+          });
+        }
         
         // Forward normalized update to client
         socket.emit('chat3:update', normalizedUpdate);

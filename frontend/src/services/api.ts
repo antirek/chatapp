@@ -159,6 +159,19 @@ class ApiService {
     return data
   }
 
+  async getDialogBotCommands(dialogId: string): Promise<ApiResponse<Array<{
+    botId: string
+    name: string
+    commands: Array<{
+      name: string
+      description?: string
+      usage?: string
+    }>
+  }>>> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/bots/commands`)
+    return data
+  }
+
   async toggleDialogFavorite(dialogId: string): Promise<ApiResponse<{ isFavorite: boolean }>> {
     const { data } = await this.api.post(`/dialogs/${dialogId}/favorite`)
     return data

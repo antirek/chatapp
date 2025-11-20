@@ -8,6 +8,7 @@ import {
   getDialogById,
   deleteDialog,
   getDialogMembers,
+  getDialogBotCommands,
   addDialogMember,
   removeDialogMember,
   sendTypingIndicator,
@@ -247,6 +248,53 @@ router.delete('/:dialogId', deleteDialog);
  *         description: List of members
  */
 router.get('/:dialogId/members', getDialogMembers);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/bots/commands:
+ *   get:
+ *     tags: [Dialogs]
+ *     summary: Get bot commands for dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: List of bots with their commands
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       botId:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *                       commands:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             name:
+ *                               type: string
+ *                             description:
+ *                               type: string
+ *                             usage:
+ *                               type: string
+ */
+router.get('/:dialogId/bots/commands', getDialogBotCommands);
 
 /**
  * @openapi

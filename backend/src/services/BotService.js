@@ -23,6 +23,32 @@ class BotService {
     this.botHandlers.set('echo', async (bot, message, dialogId) => {
       const content = message.content || '';
       
+      // Check for commands (supports both /command and /command@bot_XXX)
+      if (content.startsWith('/')) {
+        const commandMatch = content.match(/^\/(\w+)(?:@(\w+))?(?:\s+(.+))?$/);
+        if (commandMatch) {
+          const [, commandName, targetBotId, args] = commandMatch;
+          
+          // If bot ID is specified, check if it matches this bot
+          if (targetBotId && targetBotId !== bot.botId) {
+            // Command is for another bot, ignore
+            return null;
+          }
+          
+          if (commandName === 'info') {
+            // Command: /info or /info@bot_echo
+            return {
+              content: `Бот: ${bot.name}\nОписание: ${bot.description || 'Нет описания'}\nID: ${bot.botId}`,
+              type: 'internal.text',
+              meta: {
+                botResponse: true,
+                command: 'info',
+              },
+            };
+          }
+        }
+      }
+      
       // Echo the message back
       return {
         content: content,
@@ -44,6 +70,84 @@ class BotService {
       if (senderId === 'system' || senderId?.startsWith('bot_')) {
         console.log(`⏭️  [Classify Bot] Skipping message from ${senderId}`);
         return null;
+      }
+      
+      // Check for /classify command (supports both /classify param and /classify@bot_classify param)
+      console.log(`🔍 [Classify Bot] Checking content: "${content}" for bot ${bot.botId}`);
+      const classifyCommandMatch = content.match(/^\/classify(?:@(\w+))?\s+(.+)$/);
+      if (classifyCommandMatch) {
+        const [, targetBotId, param] = classifyCommandMatch;
+        
+        console.log(`🔍 [Classify Bot] Command matched. targetBotId: ${targetBotId}, bot.botId: ${bot.botId}`);
+        
+        // If bot ID is specified, check if it matches this bot
+        if (targetBotId && targetBotId !== bot.botId) {
+          // Command is for another bot, ignore
+          console.log(`⏭️  [Classify Bot] Command is for bot ${targetBotId}, ignoring`);
+          return null;
+        }
+        
+        const classification = param.trim();
+        
+        console.log(`📊 [Classify Bot] Command /classify${targetBotId ? '@' + targetBotId : ''} with param: ${classification}`);
+          
+          try {
+            // Get dialog
+            const dialogResponse = await Chat3Client.getDialog(dialogId);
+            const dialog = dialogResponse?.data || dialogResponse;
+            const dialogMeta = dialog?.meta || {};
+            
+            // Set classification meta tag
+            await Chat3Client.setMeta('dialog', dialogId, 'classification', { value: classification });
+            console.log(`✅ [Classify Bot] Set classification meta tag: ${classification}`);
+            
+            // Set classifyStatus to end
+            await Chat3Client.setMeta('dialog', dialogId, 'classifyStatus', { value: 'end' });
+            
+            // Add system message
+            await Chat3Client.createMessage(dialogId, {
+              content: `классифицировано как: ${classification}`,
+              type: mapOutgoingMessageType('system'),
+              senderId: 'system',
+              meta: {
+                classification,
+                classifiedBy: bot.botId,
+                command: true,
+              },
+            });
+            console.log(`✅ [Classify Bot] Added system message "классифицировано как: ${classification}"`);
+            
+            // Return confirmation message
+            return {
+              content: `Диалог классифицирован как: ${classification}`,
+              type: 'internal.text',
+              meta: {
+                botResponse: true,
+                command: 'classify',
+              },
+            };
+          } catch (error) {
+            console.error(`❌ [Classify Bot] Error processing /classify command:`, error.message);
+            return {
+              content: `Ошибка при классификации: ${error.message}`,
+              type: 'internal.text',
+              meta: {
+                botResponse: true,
+                command: 'classify',
+                error: true,
+              },
+            };
+          }
+      } else if (content.startsWith('/classify')) {
+        // Command without parameter or invalid format
+        return {
+          content: 'Использование: /classify <параметр>\nПример: /classify проблема\nИли: /classify@bot_classify проблема',
+          type: 'internal.text',
+          meta: {
+            botResponse: true,
+            command: 'classify',
+          },
+        };
       }
       
       try {
@@ -320,15 +424,21 @@ class BotService {
       }
 
       // Send response via Chat3Client
+      // Merge meta objects (messageMeta takes precedence)
+      const mergedMeta = {
+        ...(response.meta || {}),
+        ...messageMeta,
+      };
+      
       const result = await Chat3Client.createMessage(dialogId, {
         senderId: botId,
         content: response.content,
         type: response.type,
-        meta: messageMeta,
-        meta: response.meta || {},
+        meta: mergedMeta,
       });
 
       console.log(`✅ Bot ${botId} responded to message in dialog ${dialogId}`);
+      console.log(`📤 [BotService] Message sent, waiting for Chat3 update...`);
       return result;
     } catch (error) {
       console.error(`❌ Error processing message for bot ${botId}:`, error.message);
@@ -354,6 +464,13 @@ class BotService {
           description: 'Echo bot that responds with the same message',
           handler: 'echo',
           isActive: true,
+          commands: [
+            {
+              name: 'info',
+              description: 'Показать информацию о боте',
+              usage: '/info',
+            },
+          ],
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -362,6 +479,18 @@ class BotService {
         echoBot = await Bot.findOne({ botId: 'bot_echo' });
         console.log('✅ Created system bot: bot_echo');
       } else {
+        // Update commands if not present
+        if (!echoBot.commands || echoBot.commands.length === 0) {
+          echoBot.commands = [
+            {
+              name: 'info',
+              description: 'Показать информацию о боте',
+              usage: '/info',
+            },
+          ];
+          await echoBot.save();
+          console.log('✅ Updated bot_echo with commands');
+        }
         console.log('ℹ️  System bot bot_echo already exists');
       }
 
@@ -380,6 +509,13 @@ class BotService {
           description: 'Bot that classifies incoming dialogs',
           handler: 'classify',
           isActive: true,
+          commands: [
+            {
+              name: 'classify',
+              description: 'Классифицировать диалог',
+              usage: '/classify <параметр>',
+            },
+          ],
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -388,6 +524,18 @@ class BotService {
         classifyBot = await Bot.findOne({ botId: 'bot_classify' });
         console.log('✅ Created system bot: bot_classify');
       } else {
+        // Update commands if not present
+        if (!classifyBot.commands || classifyBot.commands.length === 0) {
+          classifyBot.commands = [
+            {
+              name: 'classify',
+              description: 'Классифицировать диалог',
+              usage: '/classify <параметр>',
+            },
+          ];
+          await classifyBot.save();
+          console.log('✅ Updated bot_classify with commands');
+        }
         console.log('ℹ️  System bot bot_classify already exists');
       }
 

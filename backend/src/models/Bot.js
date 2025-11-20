@@ -57,6 +57,22 @@ const botSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: {},
   },
+  // Bot commands (array of command objects)
+  commands: [{
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    usage: {
+      type: String,
+      trim: true,
+    },
+  }],
   createdAt: {
     type: Date,
     default: Date.now,
