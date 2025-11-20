@@ -609,19 +609,77 @@ function isOwnMessage(message: Message): boolean {
   return message.senderId === authStore.user?.userId
 }
 
-function isBusinessMessage(message: Message): boolean {
-  const contactId = businessContactId.value
-  return (
-    isBusinessContact.value &&
-    !!contactId &&
-    message.senderId === contactId
-  )
+/**
+ * Определяет тип участника по senderId или message.sender.type
+ * @returns 'user' | 'bot' | 'contact'
+ */
+function getSenderType(message: Message): 'user' | 'bot' | 'contact' {
+  // Проверяем message.sender.type, если есть
+  if (message.sender?.type) {
+    if (message.sender.type === 'contact') return 'contact'
+    if (message.sender.type === 'bot') return 'bot'
+    if (message.sender.type === 'user') return 'user'
+  }
+  
+  // Определяем по префиксу senderId
+  const senderId = message.senderId || ''
+  if (senderId.startsWith('cnt_')) return 'contact'
+  if (senderId.startsWith('bot_')) return 'bot'
+  
+  // По умолчанию считаем user
+  return 'user'
 }
 
+/**
+ * Проверяет, является ли отправитель бизнес-контактом
+ */
+function isBusinessContactSender(message: Message): boolean {
+  const senderType = getSenderType(message)
+  if (senderType === 'contact') return true
+  
+  // Дополнительная проверка по businessContactId для personal_contact диалогов
+  if (isBusinessContact.value) {
+    const contactId = businessContactId.value
+    return !!contactId && message.senderId === contactId
+  }
+  
+  return false
+}
+
+/**
+ * Определяет выравнивание сообщения согласно спецификации:
+ * - p2p: свои справа, собеседник слева
+ * - group: свои справа, все остальные слева
+ * - personal_contact: свои справа, бизнес-контакт слева, коллеги справа
+ */
 function shouldAlignRight(message: Message): boolean {
-  if (isBusinessMessage(message)) {
+  // Свои сообщения всегда справа
+  if (isOwnMessage(message)) {
+    return true
+  }
+  
+  // Для p2p диалогов: собеседник слева
+  if (isP2PDialog.value) {
     return false
   }
+  
+  // Для group диалогов: все остальные слева
+  if (isGroupChat.value) {
+    return false
+  }
+  
+  // Для personal_contact диалогов:
+  // - бизнес-контакт слева
+  // - коллеги (user/bot) справа
+  if (isBusinessContact.value) {
+    if (isBusinessContactSender(message)) {
+      return false // Бизнес-контакт слева
+    }
+    // Коллеги (user/bot) справа
+    return true
+  }
+  
+  // Fallback: по умолчанию справа
   return true
 }
 
