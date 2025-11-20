@@ -117,15 +117,8 @@ class BotService {
             });
             console.log(`✅ [Classify Bot] Added system message "классифицировано как: ${classification}"`);
             
-            // Return confirmation message
-            return {
-              content: `Диалог классифицирован как: ${classification}`,
-              type: 'internal.text',
-              meta: {
-                botResponse: true,
-                command: 'classify',
-              },
-            };
+            // Return null - only system message, no user-visible response
+            return null;
           } catch (error) {
             console.error(`❌ [Classify Bot] Error processing /classify command:`, error.message);
             return {
@@ -512,8 +505,8 @@ class BotService {
           commands: [
             {
               name: 'classify',
-              description: 'Классифицировать диалог',
-              usage: '/classify <параметр>',
+              description: 'Классифицировать диалог вручную',
+              usage: '/classify@bot_classify <параметр>',
             },
           ],
           createdAt: new Date(),
@@ -524,17 +517,26 @@ class BotService {
         classifyBot = await Bot.findOne({ botId: 'bot_classify' });
         console.log('✅ Created system bot: bot_classify');
       } else {
-        // Update commands if not present
+        // Update commands if not present or update existing
         if (!classifyBot.commands || classifyBot.commands.length === 0) {
           classifyBot.commands = [
             {
               name: 'classify',
-              description: 'Классифицировать диалог',
-              usage: '/classify <параметр>',
+              description: 'Классифицировать диалог вручную',
+              usage: '/classify <параметр>@bot_classify',
             },
           ];
           await classifyBot.save();
           console.log('✅ Updated bot_classify with commands');
+        } else {
+          // Update existing command description and usage
+          const classifyCmd = classifyBot.commands.find(cmd => cmd.name === 'classify');
+          if (classifyCmd) {
+            classifyCmd.description = 'Классифицировать диалог вручную';
+            classifyCmd.usage = '/classify@bot_classify <параметр>';
+            await classifyBot.save();
+            console.log('✅ Updated bot_classify command description');
+          }
         }
         console.log('ℹ️  System bot bot_classify already exists');
       }
