@@ -86,12 +86,22 @@ export const useDialogsStore = defineStore('dialogs', () => {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const response = await api.getDialogs({
+        const requestParams: {
+          page: number
+          limit: number
+          includeLastMessage: boolean
+          type?: 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
+        } = {
           page,
           limit,
-          includeLastMessage,
-          type: filterForRequest
-        })
+          includeLastMessage
+        }
+        
+        if (filterForRequest !== 'all') {
+          requestParams.type = filterForRequest
+        }
+        
+        const response = await api.getDialogs(requestParams)
 
         const normalizedDialogs = response.data.map(dialog => normalizeDialog(dialog))
         const rawPagination = response.pagination || {
@@ -357,13 +367,25 @@ export const useDialogsStore = defineStore('dialogs', () => {
     const sequenceId = ++searchSequence.value
 
     try {
-      const response = await api.getDialogs({
+      const requestParams: {
+        search: string
+        page: number
+        limit: number
+        includeLastMessage: boolean
+        type?: 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
+      } = {
         search: trimmed,
         page,
         limit: options?.limit || 50,
-        includeLastMessage: true,
-        type: options?.type || currentFilter.value === 'all' ? undefined : currentFilter.value
-      })
+        includeLastMessage: true
+      }
+      
+      const filterType = options?.type || currentFilter.value
+      if (filterType !== 'all') {
+        requestParams.type = filterType
+      }
+      
+      const response = await api.getDialogs(requestParams)
 
       if (sequenceId === searchSequence.value) {
         if (append) {
@@ -397,10 +419,18 @@ export const useDialogsStore = defineStore('dialogs', () => {
       return
     }
 
-    await searchDialogs(lastSearchTerm.value, {
-      append: true,
-      type: currentFilter.value === 'all' ? undefined : currentFilter.value
-    })
+    const searchOptions: {
+      append: boolean
+      type?: 'p2p' | 'group:private' | 'group:public' | 'favorites' | 'business-contacts' | 'unread'
+    } = {
+      append: true
+    }
+    
+    if (currentFilter.value !== 'all') {
+      searchOptions.type = currentFilter.value
+    }
+    
+    await searchDialogs(lastSearchTerm.value, searchOptions)
   }
 
   function clearSearch() {

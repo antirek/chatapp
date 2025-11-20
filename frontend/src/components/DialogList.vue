@@ -424,10 +424,18 @@ async function handleFilterClick(filter: FilterOptionValue) {
       append: false
     })
     if (trimmedSearch.length >= MIN_SEARCH_LENGTH) {
-      await dialogsStore.searchDialogs(trimmedSearch, {
-        page: 1,
-        type: nextFilter === 'all' ? undefined : nextFilter
-      })
+      const searchOptions: {
+        page: number
+        type?: FilterOptionValue
+      } = {
+        page: 1
+      }
+      
+      if (nextFilter !== 'all') {
+        searchOptions.type = nextFilter
+      }
+      
+      await dialogsStore.searchDialogs(trimmedSearch, searchOptions)
     }
   } catch (error) {
     console.error('Failed to apply dialog filter:', error)
