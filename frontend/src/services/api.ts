@@ -177,6 +177,21 @@ class ApiService {
     return data
   }
 
+  async pinMessage(dialogId: string, messageId: string): Promise<ApiResponse<{ messageId: string; pinnedAt: string; pinnedBy: string }>> {
+    const { data } = await this.api.post(`/dialogs/${dialogId}/pin/${messageId}`)
+    return data
+  }
+
+  async unpinMessage(dialogId: string): Promise<ApiResponse> {
+    const { data } = await this.api.delete(`/dialogs/${dialogId}/pin`)
+    return data
+  }
+
+  async getPinnedMessage(dialogId: string): Promise<ApiResponse<{ message: Message; pinnedAt: string; pinnedBy: string } | null>> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/pinned`)
+    return data
+  }
+
   async markDialogAsRead(dialogId: string, payload?: { unreadCount?: number; lastSeenAt?: number; reason?: string }): Promise<ApiResponse<{ unreadCount: number }>> {
     const { data } = await this.api.patch(`/dialogs/${dialogId}/unread`, payload)
     return data

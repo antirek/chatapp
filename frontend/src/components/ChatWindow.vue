@@ -74,6 +74,34 @@
       </div>
     </div>
 
+    <!-- Pinned Message Banner -->
+    <div
+      v-if="pinnedMessage"
+      @click="scrollToPinnedMessage"
+      class="px-4 py-2 bg-yellow-50 border-b border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors flex items-center gap-2"
+    >
+      <svg class="w-4 h-4 text-yellow-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium text-yellow-800 truncate">
+          Закрепленное сообщение
+        </div>
+        <div class="text-sm text-yellow-700 truncate">
+          {{ getSenderName(pinnedMessage) }}: {{ getMessagePreview(pinnedMessage) }}
+        </div>
+      </div>
+      <button
+        @click.stop="handleUnpinMessage"
+        class="p-1 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-200 rounded transition-colors"
+        title="Открепить"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
     <!-- Messages -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50" @scroll="handleScroll">
       <!-- Loading More (at top) -->
@@ -90,6 +118,7 @@
       <div
         v-for="message in messagesStore.sortedMessages"
         :key="`${message.messageId || message._id}-${JSON.stringify(message.statuses || [])}`"
+        :data-message-id="message.messageId || message._id"
       >
         <!-- System Notification Message -->
         <div
@@ -221,16 +250,34 @@
               ✓ Отметить прочтенным
             </button>
 
-            <!-- Reply Button -->
-            <button
+            <!-- Action Buttons -->
+            <div
               v-if="!isSystemNotification(message)"
-              @click.stop="handleQuoteMessage(message)"
-              class="absolute opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-white shadow-md border border-gray-200 hover:bg-gray-50 z-10 whitespace-nowrap text-gray-700 hover:text-gray-900"
+              class="absolute opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10"
               :class="isOwnMessage(message) ? 'top-1 right-1' : 'top-1 left-1'"
-              title="Ответить"
             >
-              Ответить
-            </button>
+              <!-- Reply Button -->
+              <button
+                @click.stop="handleQuoteMessage(message)"
+                class="text-xs px-2 py-1 rounded bg-white shadow-md border border-gray-200 hover:bg-gray-50 whitespace-nowrap text-gray-700 hover:text-gray-900"
+                title="Ответить"
+              >
+                Ответить
+              </button>
+              <!-- Pin/Unpin Button -->
+              <button
+                @click.stop="handleTogglePin(message)"
+                :disabled="isPinning"
+                class="text-xs px-2 py-1 rounded bg-white shadow-md border border-gray-200 hover:bg-gray-50 whitespace-nowrap transition-colors"
+                :class="isMessagePinned(message) ? 'text-yellow-600 border-yellow-300' : 'text-gray-700 hover:text-gray-900'"
+                :title="isMessagePinned(message) ? 'Открепить сообщение' : 'Закрепить сообщение'"
+              >
+                <svg class="w-3 h-3 inline-block mr-1" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
+                </svg>
+                {{ isMessagePinned(message) ? 'Открепить' : 'Закрепить' }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -340,6 +387,9 @@ const userNamesCache = ref<Record<string, string>>({})
 const fetchingUserNames = new Set<string>()
 const existingMemberIds = ref<string[]>([])
 const quotedMessage = ref<Message | null>(null)
+const pinnedMessage = ref<Message | null>(null)
+const pinnedMessageData = ref<{ pinnedAt?: string; pinnedBy?: string } | null>(null)
+const isPinning = ref(false)
 const currentUserId = computed(() => authStore.user?.userId || '')
 const legacyFavoriteKey = computed(() =>
   currentUserId.value ? `${LEGACY_FAVORITE_PREFIX}${currentUserId.value}` : null
@@ -451,18 +501,26 @@ let isUserNearBottom = true
 let isInitialLoad = true
 
 // Load messages when dialog changes
+// Load messages and pinned message when dialog changes
 watch(() => props.dialog?.dialogId, async (dialogId) => {
   if (dialogId) {
     isInitialLoad = true
     isUserNearBottom = true
     previousScrollHeight = 0
-    await messagesStore.fetchMessages(dialogId)
+    // Load pinned message and messages in parallel
+    await Promise.all([
+      loadPinnedMessage(),
+      messagesStore.fetchMessages(dialogId)
+    ])
     await nextTick()
     scrollToBottom()
     // Initialize scroll height after first load
     if (messagesContainer.value) {
       previousScrollHeight = messagesContainer.value.scrollHeight
     }
+  } else {
+    pinnedMessage.value = null
+    pinnedMessageData.value = null
   }
 }, { immediate: true })
 
@@ -1085,6 +1143,150 @@ function handleQuoteMessage(message: Message) {
 
 function handleCancelQuote() {
   quotedMessage.value = null
+}
+
+// Load pinned message
+async function loadPinnedMessage() {
+  if (!props.dialog?.dialogId) return
+  
+  try {
+    const response = await api.getPinnedMessage(props.dialog.dialogId)
+    if (response.success && response.data) {
+      pinnedMessage.value = response.data.message
+      pinnedMessageData.value = {
+        pinnedAt: response.data.pinnedAt,
+        pinnedBy: response.data.pinnedBy,
+      }
+    } else {
+      pinnedMessage.value = null
+      pinnedMessageData.value = null
+    }
+  } catch (error: any) {
+    console.error('Failed to load pinned message:', error)
+    pinnedMessage.value = null
+    pinnedMessageData.value = null
+  }
+}
+
+// Pin message functions
+function isMessagePinned(message: Message): boolean {
+  if (!pinnedMessage.value || !message) return false
+  const messageId = message.messageId || message._id
+  const pinnedId = pinnedMessage.value.messageId || pinnedMessage.value._id
+  return messageId === pinnedId
+}
+
+async function handleTogglePin(message: Message) {
+  if (isPinning.value) return
+  
+  const messageId = message.messageId || message._id
+  if (!messageId) return
+
+  isPinning.value = true
+  try {
+    if (isMessagePinned(message)) {
+      // Unpin
+      await api.unpinMessage(props.dialog.dialogId)
+      pinnedMessage.value = null
+      pinnedMessageData.value = null
+    } else {
+      // Pin
+      await api.pinMessage(props.dialog.dialogId, messageId)
+      pinnedMessage.value = message
+      pinnedMessageData.value = {
+        pinnedAt: new Date().toISOString(),
+        pinnedBy: currentUserId.value,
+      }
+    }
+  } catch (error: any) {
+    console.error('Failed to toggle pin:', error)
+    alert(error.response?.data?.error || 'Не удалось закрепить сообщение')
+  } finally {
+    isPinning.value = false
+  }
+}
+
+async function handleUnpinMessage() {
+  if (isPinning.value) return
+  
+  isPinning.value = true
+  try {
+    await api.unpinMessage(props.dialog.dialogId)
+    pinnedMessage.value = null
+    pinnedMessageData.value = null
+  } catch (error: any) {
+    console.error('Failed to unpin message:', error)
+    alert(error.response?.data?.error || 'Не удалось открепить сообщение')
+  } finally {
+    isPinning.value = false
+  }
+}
+
+async function scrollToPinnedMessage() {
+  if (!pinnedMessage.value) return
+  
+  const messageId = pinnedMessage.value.messageId || pinnedMessage.value._id
+  if (!messageId) return
+
+  // Check if message is already loaded
+  const existingMessage = messagesStore.messages.find(
+    (m) => (m.messageId || m._id) === messageId
+  )
+
+  if (existingMessage) {
+    // Message is loaded, scroll to it
+    await nextTick()
+    scrollToMessage(messageId)
+  } else {
+    // Message is not loaded, need to fetch it
+    // For now, just scroll to bottom and highlight when loaded
+    // In a full implementation, we'd fetch the specific message
+    console.log('Pinned message not in current view, loading messages...')
+    await messagesStore.fetchMessages(props.dialog.dialogId, { page: 1, limit: 100 })
+    await nextTick()
+    scrollToMessage(messageId)
+  }
+}
+
+function scrollToMessage(messageId: string) {
+  if (!messagesContainer.value) return
+
+  // Find message element by data attribute
+  const messageElement = messagesContainer.value.querySelector(
+    `[data-message-id="${messageId}"]`
+  ) as HTMLElement
+
+  if (messageElement) {
+    messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    
+    // Highlight the message
+    messageElement.classList.add('bg-yellow-100')
+    setTimeout(() => {
+      messageElement.classList.remove('bg-yellow-100')
+    }, 2000)
+  }
+}
+
+function getMessagePreview(message: Message): string {
+  if (!message) return ''
+  
+  if (message.content) {
+    // Truncate long messages
+    return message.content.length > 50 
+      ? message.content.substring(0, 50) + '...'
+      : message.content
+  }
+  
+  // Handle different message types
+  const type = message.type || ''
+  if (type.includes('image')) {
+    return '📷 Изображение'
+  }
+  if (type.includes('file')) {
+    return '📎 Файл'
+  }
+  
+  return 'Сообщение'
 }
 
 function getQuotedMessageSenderName(quotedMessage: any): string {

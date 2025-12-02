@@ -18,6 +18,7 @@ const LEGACY_P2P_NAME_PREFIX = 'p2pDialogNameFor';
 const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor';
 const FAVORITE_META_KEY = 'favorite';
 const LEGACY_FAVORITE_PREFIX = 'favoriteFor';
+const PINNED_MESSAGE_META_KEY = 'pinnedMessage';
 
 function extractMetaValue(meta, key) {
   if (!meta || !key) {
@@ -1435,6 +1436,217 @@ export async function toggleDialogFavorite(req, res) {
     return res.status(500).json({
       success: false,
       error: error.response?.data?.error || error.message || 'Failed to toggle favorite',
+    });
+  }
+}
+
+/**
+ * Pin a message in a dialog
+ * POST /api/dialogs/:dialogId/pin/:messageId
+ */
+export async function pinMessage(req, res) {
+  try {
+    const { dialogId, messageId } = req.params;
+    const currentUserId = req.user.userId;
+
+    console.log(`📌 [pinMessage] User ${currentUserId} pinning message ${messageId} in dialog ${dialogId}`);
+
+    // Check if user is a member of the dialog
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 100 });
+    const members = membersResponse?.data || membersResponse || [];
+    const isMember = members.some(m => m.userId === currentUserId);
+
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not a member of this dialog',
+      });
+    }
+
+    // Verify message exists and belongs to this dialog
+    let message;
+    try {
+      const messageResponse = await Chat3Client.getMessage(messageId);
+      message = messageResponse?.data || messageResponse;
+      
+      // Check if message exists and belongs to this dialog
+      // dialogId might be in different formats (string or ObjectId)
+      const messageDialogId = message?.dialogId?.toString() || message?.dialogId;
+      const targetDialogId = dialogId.toString();
+      
+      if (!message || messageDialogId !== targetDialogId) {
+        return res.status(404).json({
+          success: false,
+          error: 'Message not found in this dialog',
+        });
+      }
+    } catch (error) {
+      if (error.response?.status === 404) {
+        return res.status(404).json({
+          success: false,
+          error: 'Message not found',
+        });
+      }
+      throw error;
+    }
+
+    // Set pinned message meta
+    const pinnedData = {
+      value: messageId,
+      pinnedAt: new Date().toISOString(),
+      pinnedBy: currentUserId,
+    };
+
+    await Chat3Client.setMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY, pinnedData);
+
+    console.log(`✅ [pinMessage] Message ${messageId} pinned in dialog ${dialogId}`);
+
+    return res.json({
+      success: true,
+      data: {
+        messageId,
+        pinnedAt: pinnedData.pinnedAt,
+        pinnedBy: currentUserId,
+      },
+    });
+  } catch (error) {
+    console.error('Error pinning message:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to pin message',
+    });
+  }
+}
+
+/**
+ * Unpin a message from a dialog
+ * DELETE /api/dialogs/:dialogId/pin
+ */
+export async function unpinMessage(req, res) {
+  try {
+    const { dialogId } = req.params;
+    const currentUserId = req.user.userId;
+
+    console.log(`📌 [unpinMessage] User ${currentUserId} unpinning message from dialog ${dialogId}`);
+
+    // Check if user is a member of the dialog
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 100 });
+    const members = membersResponse?.data || membersResponse || [];
+    const isMember = members.some(m => m.userId === currentUserId);
+
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not a member of this dialog',
+      });
+    }
+
+    // Delete pinned message meta
+    await Chat3Client.deleteMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY);
+
+    console.log(`✅ [unpinMessage] Message unpinned from dialog ${dialogId}`);
+
+    return res.json({
+      success: true,
+      message: 'Message unpinned',
+    });
+  } catch (error) {
+    console.error('Error unpinning message:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to unpin message',
+    });
+  }
+}
+
+/**
+ * Get pinned message for a dialog
+ * GET /api/dialogs/:dialogId/pinned
+ */
+export async function getPinnedMessage(req, res) {
+  try {
+    const { dialogId } = req.params;
+    const currentUserId = req.user.userId;
+
+    console.log(`📌 [getPinnedMessage] Getting pinned message for dialog ${dialogId}`);
+
+    // Check if user is a member of the dialog
+    const membersResponse = await Chat3Client.getDialogMembers(dialogId, { limit: 100 });
+    const members = membersResponse?.data || membersResponse || [];
+    const isMember = members.some(m => m.userId === currentUserId);
+
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'You are not a member of this dialog',
+      });
+    }
+
+    // Get pinned message meta
+    let pinnedMeta;
+    try {
+      const metaResponse = await Chat3Client.getMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY);
+      pinnedMeta = metaResponse?.data || metaResponse;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        // No pinned message
+        return res.json({
+          success: true,
+          data: null,
+        });
+      }
+      throw error;
+    }
+
+    if (!pinnedMeta || !pinnedMeta.value) {
+      return res.json({
+        success: true,
+        data: null,
+      });
+    }
+
+    const messageId = pinnedMeta.value;
+
+    // Get the actual message
+    let message;
+    try {
+      const messageResponse = await Chat3Client.getMessage(messageId);
+      message = messageResponse?.data || messageResponse;
+      
+      // Ensure message has required fields
+      if (!message) {
+        throw new Error('Message data is empty');
+      }
+    } catch (error) {
+      if (error.response?.status === 404 || error.message === 'Message data is empty') {
+        // Message was deleted, remove pinned meta
+        console.warn(`⚠️ [getPinnedMessage] Pinned message ${messageId} not found, removing pin`);
+        try {
+          await Chat3Client.deleteMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY);
+        } catch (deleteError) {
+          console.error('Failed to remove invalid pinned message meta:', deleteError);
+        }
+        return res.json({
+          success: true,
+          data: null,
+        });
+      }
+      throw error;
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        message,
+        pinnedAt: pinnedMeta.pinnedAt,
+        pinnedBy: pinnedMeta.pinnedBy,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting pinned message:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.error || error.message || 'Failed to get pinned message',
     });
   }
 }

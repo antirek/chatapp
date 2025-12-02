@@ -14,6 +14,9 @@ import {
   sendTypingIndicator,
   markDialogAsRead,
   toggleDialogFavorite,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessage,
 } from '../controllers/dialogsController.js';
 
 const router = express.Router();
@@ -373,5 +376,78 @@ router.delete('/:dialogId/members/:userId', removeDialogMember);
  *         description: Dialog not found
  */
 router.post('/:dialogId/favorite', toggleDialogFavorite);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/pin/{messageId}:
+ *   post:
+ *     tags: [Dialogs]
+ *     summary: Pin a message in a dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: messageId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Message pinned successfully
+ *       '403':
+ *         description: User is not a member of the dialog
+ *       '404':
+ *         description: Message not found
+ */
+router.post('/:dialogId/pin/:messageId', pinMessage);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/pin:
+ *   delete:
+ *     tags: [Dialogs]
+ *     summary: Unpin a message from a dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Message unpinned successfully
+ *       '403':
+ *         description: User is not a member of the dialog
+ */
+router.delete('/:dialogId/pin', unpinMessage);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/pinned:
+ *   get:
+ *     tags: [Dialogs]
+ *     summary: Get pinned message for a dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Pinned message data (or null if no pinned message)
+ *       '403':
+ *         description: User is not a member of the dialog
+ */
+router.get('/:dialogId/pinned', getPinnedMessage);
 
 export default router;
