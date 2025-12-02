@@ -150,13 +150,13 @@ export async function receiveChannelMessage(req, res) {
         const dialogName = contact.name;
         
         const dialogResponse = await Chat3Client.createDialog({
-          name: dialogName,
           createdBy,
           meta: {
             type: { value: 'personal_contact' },
             contactId: { value: contact.contactId },
             contactName: { value: contact.name },
             classifyStatus: { value: 'init' },
+            name: { value: dialogName },
           },
         });
         

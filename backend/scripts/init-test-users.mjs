@@ -11,9 +11,6 @@ import config from '../src/config/index.js';
 import User from '../src/models/User.js';
 import chat3ClientInstance from '../src/services/Chat3Client.js';
 
-// Chat3Client экспортируется как экземпляр, используем его напрямую
-const chat3Client = chat3ClientInstance;
-
 // Список тестовых пользователей
 const TEST_USERS = [
   { lastName: 'Иванов', firstName: 'Иван' },
@@ -28,14 +25,15 @@ const TEST_USERS = [
   { lastName: 'Морозов', firstName: 'Александр' },
 ];
 
-// Генерация уникального телефона
-// Формат: 79 + 9 цифр (всего 11 символов)
+// Генерация уникального телефона (формат: 79XXXXXXXXX - 11 цифр)
 function generatePhone(index) {
-  // Начинаем с 7910000000 + index (79 + 100000000 + index)
-  // 79 + 100000000 = 79100000000 (11 символов), добавляем index (0-9) = 11 символов
-  // Для индекса 0-9: 79100000000 - 79100000009
+  // Начинаем с 7910000000 + index (9 цифр после 79, итого 11)
+  // 79 + 10000000 + index (00-99)
   return `791000000${index.toString().padStart(2, '0')}`;
 }
+
+// Дефолтный accountId для тестовых пользователей
+const DEFAULT_ACCOUNT_ID = 'test_account_1';
 
 // Генерация SVG аватара с инициалами
 function generateAvatarSVG(lastName, firstName, index) {
@@ -73,18 +71,23 @@ function generateAvatarSVG(lastName, firstName, index) {
 // Создание пользователя в локальной БД
 async function createLocalUser(name, phone) {
   try {
-    // Проверяем, существует ли пользователь
-    let user = await User.findOne({ phone });
+    // Проверяем, существует ли пользователь (по accountId + phone или просто phone)
+    let user = await User.findOne({ accountId: DEFAULT_ACCOUNT_ID, phone }) || 
+                await User.findOne({ phone });
     
     if (user) {
-      console.log(`⚠️  Пользователь с телефоном ${phone} уже существует, обновляем имя`);
+      console.log(`⚠️  Пользователь с телефоном ${phone} уже существует, обновляем имя и accountId`);
       user.name = name;
+      if (!user.accountId) {
+        user.accountId = DEFAULT_ACCOUNT_ID;
+      }
       await user.save();
       return user;
     }
     
     // Создаем нового пользователя
     user = new User({
+      accountId: DEFAULT_ACCOUNT_ID,
       phone,
       name,
       // Не устанавливаем verificationCode - это тестовые пользователи
@@ -140,10 +143,15 @@ async function uploadAvatar(chat3Client, userId, avatar) {
 // Создание диалога между двумя пользователями
 async function createDialog(chat3Client, userId1, userId2, name1, name2) {
   try {
-    // Создаем диалог
+    const dialogName = `Диалог с ${name2}`;
+    
+    // Создаем диалог (Chat3 больше не имеет свойства name, используем мета-тег)
     const dialog = await chat3Client.createDialog({
-      name: `Диалог с ${name2}`,
       createdBy: userId1,
+      meta: {
+        name: { value: dialogName },
+        type: { value: 'p2p' },
+      },
     });
     
     const dialogId = dialog.data?.dialogId || dialog.data?._id || dialog.dialogId || dialog._id;
@@ -156,65 +164,10 @@ async function createDialog(chat3Client, userId1, userId2, name1, name2) {
     await chat3Client.addDialogMember(dialogId, userId1);
     await chat3Client.addDialogMember(dialogId, userId2);
     
-    // Устанавливаем мета-тег type=p2p для диалога
-    try {
-      await chat3Client.setMeta('dialog', dialogId, 'type', { value: 'p2p' });
-      console.log(`✅ Установлен мета-тег type=p2p для диалога ${dialogId}`);
-    } catch (metaError) {
-      console.warn(`⚠️  Не удалось установить мета-тег type=p2p для диалога ${dialogId}:`, metaError.message);
-    }
-    
     console.log(`✅ Создан диалог между ${name1} и ${name2} (${dialogId})`);
     return dialogId;
   } catch (error) {
     console.error(`❌ Ошибка создания диалога между ${name1} и ${name2}:`, error.message);
-    throw error;
-  }
-}
-
-// Создание группы с несколькими участниками
-async function createGroup(chat3Client, ownerId, ownerName, groupName, memberIds) {
-  try {
-    // Создаем диалог (группу)
-    const dialog = await chat3Client.createDialog({
-      name: groupName,
-      createdBy: ownerId,
-    });
-    
-    const dialogId = dialog.data?.dialogId || dialog.data?._id || dialog.dialogId || dialog._id;
-    
-    if (!dialogId) {
-      throw new Error('Не удалось получить dialogId из ответа');
-    }
-    
-    // Добавляем создателя как участника
-    await chat3Client.addDialogMember(dialogId, ownerId);
-    
-    // Добавляем остальных участников
-    for (const memberId of memberIds) {
-      await chat3Client.addDialogMember(dialogId, memberId);
-    }
-    
-    // Устанавливаем мета-тег type=group для диалога
-    try {
-      await chat3Client.setMeta('dialog', dialogId, 'type', { value: 'group' });
-      console.log(`✅ Установлен мета-тег type=group для группы ${dialogId}`);
-    } catch (metaError) {
-      console.warn(`⚠️  Не удалось установить мета-тег type=group для группы ${dialogId}:`, metaError.message);
-    }
-    
-    // Устанавливаем мета-тег role=owner для создателя
-    try {
-      await chat3Client.setMeta('dialogMember', `${dialogId}:${ownerId}`, 'role', { value: 'owner' });
-      console.log(`✅ Установлен мета-тег role=owner для создателя ${ownerName} в группе ${dialogId}`);
-    } catch (roleError) {
-      console.warn(`⚠️  Не удалось установить мета-тег role=owner для создателя в группе ${dialogId}:`, roleError.message);
-    }
-    
-    console.log(`✅ Создана группа "${groupName}" (${dialogId}) с ${memberIds.length + 1} участниками`);
-    return dialogId;
-  } catch (error) {
-    console.error(`❌ Ошибка создания группы "${groupName}":`, error.message);
     throw error;
   }
 }
@@ -229,7 +182,8 @@ async function main() {
     await mongoose.connect(config.mongodb.uri);
     console.log('✅ Подключено к MongoDB\n');
     
-    // Используем существующий экземпляр Chat3Client (уже настроен с конфигурацией)
+    // Используем экземпляр Chat3Client
+    const chat3Client = chat3ClientInstance;
     
     const createdUsers = [];
     
@@ -293,58 +247,10 @@ async function main() {
     
     console.log('\n✅ Все диалоги созданы!\n');
     
-    // Создаем две группы с несколькими участниками
-    console.log(`👥 Создание групп для ${ivanov.name}...\n`);
-    
-    // Группа 1: Первые 4 участника (кроме Иванова)
-    const group1Members = createdUsers
-      .filter(u => u.userId !== ivanov.userId)
-      .slice(0, 4)
-      .map(u => u.userId);
-    
-    if (group1Members.length > 0) {
-      try {
-        await createGroup(
-          chat3Client,
-          ivanov.userId,
-          ivanov.name,
-          'Тестовая группа 1',
-          group1Members
-        );
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } catch (error) {
-        console.error(`⚠️  Пропущена группа 1:`, error.message);
-      }
-    }
-    
-    // Группа 2: Следующие 3 участника (если есть)
-    const group2Members = createdUsers
-      .filter(u => u.userId !== ivanov.userId)
-      .slice(4, 7)
-      .map(u => u.userId);
-    
-    if (group2Members.length > 0) {
-      try {
-        await createGroup(
-          chat3Client,
-          ivanov.userId,
-          ivanov.name,
-          'Тестовая группа 2',
-          group2Members
-        );
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } catch (error) {
-        console.error(`⚠️  Пропущена группа 2:`, error.message);
-      }
-    }
-    
-    console.log('\n✅ Все группы созданы!\n');
-    
     // Выводим итоговую информацию
     console.log('📊 Итоговая информация:');
     console.log(`   - Создано пользователей: ${createdUsers.length}`);
-    console.log(`   - Создано P2P диалогов для ${ivanov.name}: ${createdUsers.length - 1}`);
-    console.log(`   - Создано групп: 2`);
+    console.log(`   - Создано диалогов для ${ivanov.name}: ${createdUsers.length - 1}`);
     console.log('\n👤 Список пользователей:');
     createdUsers.forEach((user, index) => {
       console.log(`   ${index + 1}. ${user.name} (${user.userId}) - ${user.phone}`);
@@ -364,4 +270,3 @@ async function main() {
 
 // Запускаем скрипт
 main().catch(console.error);
-

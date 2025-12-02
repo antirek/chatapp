@@ -74,13 +74,14 @@ export async function createBusinessContact(req, res) {
     const dialogName = name;
     
     // Create dialog with meta tags (Chat3 now supports passing meta tags during creation)
+    // Note: Chat3 no longer has name property, use meta.name instead
     const dialogResponse = await Chat3Client.createDialog({
-      name: dialogName,
       createdBy: currentUserId,
       meta: {
         type: { value: 'personal_contact' },
         contactId: { value: contact.contactId },
         contactName: { value: name },
+        name: { value: dialogName },
       },
     });
     
@@ -409,12 +410,13 @@ export async function getOrCreateContactDialog(req, res) {
     // Dialog doesn't exist or search failed, create new one
     const dialogName = contact.name;
     
+    // Note: Chat3 no longer has name property, use meta.name instead
     const dialogResponse = await Chat3Client.createDialog({
-      name: dialogName,
       createdBy: currentUserId,
       meta: {
         type: { value: 'personal_contact' },
         contactId: { value: contact.contactId },
+        name: { value: dialogName },
       },
     });
     

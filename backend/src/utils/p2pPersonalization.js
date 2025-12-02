@@ -82,51 +82,62 @@ export async function getP2PUserProfile(userId) {
     };
   }
 
+  // First, try to get user from local MongoDB database (has name)
+  // This is the primary source for user names
   try {
-    const response = await Chat3Client.getUser(userId);
-    return response.data || response;
-  } catch (error) {
-    if (error.response?.status === 404) {
-      // User not found in Chat3, try to get from local database
-      const localUser = await User.findOne({ userId }).lean().exec();
-      if (localUser) {
-        return {
-          userId: localUser.userId,
-          name: localUser.name,
-          phone: localUser.phone,
-          meta: {
-            displayName: localUser.name,
-            fullName: localUser.name,
-            phone: localUser.phone,
-          },
-        };
-      }
-      // If not found locally either, return a fallback profile
-      return {
-        userId,
-        name: userId,
-        phone: null,
-        meta: {
-          displayName: userId,
-          fullName: userId,
-        },
-      };
-    }
-
-    // For other errors, log and return fallback
-    console.warn(`⚠️ Failed to get user ${userId} from Chat3:`, error.message);
     const localUser = await User.findOne({ userId }).lean().exec();
-    if (localUser) {
+    if (localUser && localUser.name) {
+      // Also try to get avatar from Chat3 API
+      let avatar = null;
+      try {
+        const chat3Response = await Chat3Client.getUser(userId);
+        const chat3User = chat3Response.data || chat3Response;
+        avatar = getMetaValue(chat3User.meta, 'avatar') || chat3User.meta?.photoUrl || chat3User.avatar || null;
+      } catch (avatarError) {
+        // Ignore avatar fetch errors
+      }
+      
       return {
         userId: localUser.userId,
         name: localUser.name,
         phone: localUser.phone,
+        avatar,
         meta: {
           displayName: localUser.name,
           fullName: localUser.name,
           phone: localUser.phone,
+          avatar,
         },
       };
+    }
+  } catch (localError) {
+    console.warn(`⚠️ Failed to get user ${userId} from local DB:`, localError.message);
+  }
+
+  // Fallback to Chat3 API if not found locally
+  try {
+    const response = await Chat3Client.getUser(userId);
+    const chat3User = response.data || response;
+    
+    // If Chat3 user has name in meta, use it
+    const name = resolveUserName(chat3User);
+    if (name && name !== userId) {
+      return chat3User;
+    }
+    
+    // Chat3 user exists but has no name - return with userId as fallback
+    return {
+      ...chat3User,
+      name: userId,
+      meta: {
+        ...chat3User.meta,
+        displayName: userId,
+        fullName: userId,
+      },
+    };
+  } catch (error) {
+    if (error.response?.status !== 404) {
+      console.warn(`⚠️ Failed to get user ${userId} from Chat3:`, error.message);
     }
     
     // Final fallback

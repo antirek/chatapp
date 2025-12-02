@@ -453,19 +453,19 @@ export async function getDialogs(req, res) {
         // Search only in P2P dialogs by personalized name
         filterParts.push(`(meta.${nameMetaKey},regex,"${pattern}")`);
       } else if (requestedType === 'business-contacts') {
-        // Search in business contacts by dialog name (contact name)
-        filterParts.push(`(name,regex,"${pattern}")`);
+        // Search in business contacts by dialog name (contact name stored in meta.name)
+        filterParts.push(`(meta.name,regex,"${pattern}")`);
       } else if (requestedType === 'group:public' || requestedType === 'group:private') {
-        // Search only in groups by name
-        filterParts.push(`(name,regex,"${pattern}")`);
+        // Search only in groups by name (stored in meta.name)
+        filterParts.push(`(meta.name,regex,"${pattern}")`);
       } else {
         // Search in both P2P and groups (universal search)
         // For P2P: search by personalized name meta
-        // For groups: search by name
-        // Since Chat3 API may not support OR, we'll search by name which works for groups
+        // For groups: search by meta.name
+        // Since Chat3 API may not support OR, we'll search by meta.name which works for groups
         // and also check P2P personalized names via meta
-        // Using name filter which will match groups, and we'll filter P2P client-side if needed
-        filterParts.push(`(name,regex,"${pattern}")`);
+        // Using meta.name filter which will match groups, and we'll filter P2P client-side if needed
+        filterParts.push(`(meta.name,regex,"${pattern}")`);
       }
     }
 
@@ -476,14 +476,20 @@ export async function getDialogs(req, res) {
 
     const result = await Chat3Client.getUserDialogs(currentUserId, params);
 
-    const dialogsWithContext = result.data.map((dialog) => ({
-      ...dialog,
-      unreadCount: dialog.context?.unreadCount || 0,
-      lastSeenAt: dialog.context?.lastSeenAt,
-      lastMessageAt: dialog.context?.lastMessageAt,
-      isActive: dialog.context?.isActive || false,
-      joinedAt: dialog.context?.joinedAt,
-    }));
+    const dialogsWithContext = result.data.map((dialog) => {
+      // Extract name from meta.name.value (Chat3 no longer has name property)
+      const nameFromMeta = dialog.meta?.name?.value || dialog.meta?.name;
+      return {
+        ...dialog,
+        // Use meta.name as fallback for dialog.name
+        name: dialog.name || nameFromMeta || dialog.dialogId,
+        unreadCount: dialog.context?.unreadCount || 0,
+        lastSeenAt: dialog.context?.lastSeenAt,
+        lastMessageAt: dialog.context?.lastMessageAt,
+        isActive: dialog.context?.isActive || false,
+        joinedAt: dialog.context?.joinedAt,
+      };
+    });
 
     const processedDialogs = await Promise.all(
       dialogsWithContext.map(async (dialog) => {
@@ -587,11 +593,18 @@ export async function createDialog(req, res) {
     }
 
     const dialog = await Chat3Client.createDialog({
-      name,
       createdBy: req.user.userId,
     });
 
     const dialogId = dialog.data.dialogId || dialog.data._id;
+
+    // Set dialog name via meta tag (Chat3 no longer has name property)
+    try {
+      await Chat3Client.setMeta('dialog', dialogId, 'name', { value: name });
+      console.log(`✅ Set dialog name meta tag: "${name}" for dialog ${dialogId}`);
+    } catch (error) {
+      console.warn(`Failed to set name meta tag for dialog ${dialogId}:`, error.message);
+    }
 
     // Add creator as member with memberType=user
     const creatorInfo = await getUserInfoForDialog(req.user.userId);
@@ -714,7 +727,14 @@ export async function getPublicDialogs(req, res) {
       pagination: result.pagination,
     });
 
-    const publicGroups = result.data || [];
+    // Map public groups to include name from meta
+    const publicGroups = (result.data || []).map((group) => {
+      const nameFromMeta = group.meta?.name?.value || group.meta?.name;
+      return {
+        ...group,
+        name: group.name || nameFromMeta || group.dialogId,
+      };
+    });
 
     const userDialogIds = new Set();
     let userPage = 1;
@@ -942,8 +962,13 @@ export async function getDialogById(req, res) {
       });
     }
 
+    // Extract name from meta.name.value (Chat3 no longer has name property)
+    const nameFromMeta = dialogData.meta?.name?.value || dialogData.meta?.name;
+    
     const dialogWithContext = {
       ...dialogData,
+      // Use meta.name as fallback for dialog.name
+      name: dialogData.name || nameFromMeta || dialogData.dialogId,
       unreadCount: dialogData.context?.unreadCount || 0,
       lastSeenAt: dialogData.context?.lastSeenAt,
       lastMessageAt: dialogData.context?.lastMessageAt,

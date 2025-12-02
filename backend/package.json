@@ -10,7 +10,8 @@
     "worker": "node --watch src/workers/start.js",
     "worker:start": "node src/workers/start.js",
     "bot:worker": "node --watch src/workers/botStart.js",
-    "bot:start": "node src/workers/botStart.js"
+    "bot:start": "node src/workers/botStart.js",
+    "init:users": "node scripts/init-test-users.mjs"
   },
   "keywords": [
     "chat",
