@@ -21,7 +21,7 @@ const config = {
   
   chat3: {
     apiUrl: process.env.CHAT3_API_URL || 'http://localhost:3000/api',
-    apiKey: process.env.CHAT3_API_KEY || 'chat3_91b81eff6a450427e9e8f7e9bcd8431e02982871623301321890736ab97d55d7',
+    apiKey: process.env.CHAT3_API_KEY || 'chat3_776cde1bfcd863594ae052b4dc8bf96de98f1ee27f8077820a3817687314b470',
   },
   
   sms: {

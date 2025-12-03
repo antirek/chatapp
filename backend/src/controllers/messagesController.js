@@ -207,6 +207,7 @@ export async function getMessageById(req, res) {
 export async function updateMessageStatus(req, res) {
   try {
     const { messageId, status } = req.params;
+    const currentUserId = req.user.userId;
 
     if (!['read', 'delivered'].includes(status)) {
       return res.status(400).json({
@@ -215,7 +216,24 @@ export async function updateMessageStatus(req, res) {
       });
     }
 
-    const result = await Chat3Client.updateMessageStatus(messageId, req.user.userId, status);
+    // Get message to retrieve dialogId
+    const messageResponse = await Chat3Client.getMessage(messageId);
+    const message = messageResponse?.data || messageResponse;
+    
+    if (!message || !message.dialogId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+      });
+    }
+
+    // Use new method with user context
+    const result = await Chat3Client.updateMessageStatusInContext(
+      currentUserId,
+      message.dialogId,
+      messageId,
+      status
+    );
 
     return res.json({
       success: true,
@@ -233,11 +251,29 @@ export async function updateMessageStatus(req, res) {
 export async function getMessageReactions(req, res) {
   try {
     const { messageId } = req.params;
-    const result = await Chat3Client.getMessageReactions(messageId);
+    const currentUserId = req.user.userId;
+
+    // Get message to retrieve dialogId
+    const messageResponse = await Chat3Client.getMessage(messageId);
+    const message = messageResponse?.data || messageResponse;
+    
+    if (!message || !message.dialogId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+      });
+    }
+
+    // Use new method with user context
+    const result = await Chat3Client.getMessageReactionsInContext(
+      currentUserId,
+      message.dialogId,
+      messageId
+    );
 
     return res.json({
       success: true,
-      reactions: result.data,
+      reactions: result.data || result,
     });
   } catch (error) {
     return res.status(500).json({
@@ -251,6 +287,7 @@ export async function addReaction(req, res) {
   try {
     const { messageId } = req.params;
     const { reaction } = req.body;
+    const currentUserId = req.user.userId;
 
     if (!reaction) {
       return res.status(400).json({
@@ -259,10 +296,24 @@ export async function addReaction(req, res) {
       });
     }
 
-    await Chat3Client.addReaction(messageId, {
-      reaction,
-      userId: req.user.userId,
-    });
+    // Get message to retrieve dialogId
+    const messageResponse = await Chat3Client.getMessage(messageId);
+    const message = messageResponse?.data || messageResponse;
+    
+    if (!message || !message.dialogId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+      });
+    }
+
+    // Use new method with user context (setReaction toggles reaction)
+    await Chat3Client.setReaction(
+      currentUserId,
+      message.dialogId,
+      messageId,
+      reaction
+    );
 
     return res.json({
       success: true,
@@ -279,7 +330,26 @@ export async function addReaction(req, res) {
 export async function removeReaction(req, res) {
   try {
     const { messageId, reaction } = req.params;
-    await Chat3Client.removeReaction(messageId, reaction);
+    const currentUserId = req.user.userId;
+
+    // Get message to retrieve dialogId
+    const messageResponse = await Chat3Client.getMessage(messageId);
+    const message = messageResponse?.data || messageResponse;
+    
+    if (!message || !message.dialogId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+      });
+    }
+
+    // Use new method with user context (setReaction toggles reaction, so calling it again removes it)
+    await Chat3Client.setReaction(
+      currentUserId,
+      message.dialogId,
+      messageId,
+      reaction
+    );
 
     return res.json({
       success: true,

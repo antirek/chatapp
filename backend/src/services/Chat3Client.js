@@ -2,6 +2,15 @@ import axios from 'axios';
 import axiosLogger from 'axios-logger';
 import config from '../config/index.js';
 
+/**
+ * Chat3 API Client
+ * 
+ * This client implements methods based on Chat3 OpenAPI specification.
+ * Some legacy methods are marked as @deprecated but kept for backward compatibility.
+ * New methods follow the user-context pattern: /api/users/{userId}/dialogs/{dialogId}/...
+ * 
+ * API Documentation: http://localhost:3000/api-docs/
+ */
 class Chat3Client {
   constructor() {
     this.client = axios.create({
@@ -117,6 +126,24 @@ class Chat3Client {
   }
 
   /**
+   * Get single message in context of specific user
+   * GET /api/users/{userId}/dialogs/{dialogId}/messages/{messageId}
+   */
+  async getUserMessage(userId, dialogId, messageId) {
+    const response = await this.client.get(`/users/${userId}/dialogs/${dialogId}/messages/${messageId}`);
+    return response.data;
+  }
+
+  /**
+   * Update message content
+   * PUT /api/messages/{messageId}
+   */
+  async updateMessage(messageId, data) {
+    const response = await this.client.put(`/messages/${messageId}`, data);
+    return response.data;
+  }
+
+  /**
    * Get all messages with filtering
    */
   async getMessages(params = {}) {
@@ -165,9 +192,34 @@ class Chat3Client {
 
   /**
    * Update message status (read/delivered)
+   * Legacy method - uses old endpoint format
+   * @deprecated Use updateMessageStatusInContext instead
    */
   async updateMessageStatus(messageId, userId, status) {
     const response = await this.client.post(`/messages/${messageId}/status/${userId}/${status}`);
+    return response.data;
+  }
+
+  /**
+   * Create new message status entry (add to history)
+   * POST /api/users/{userId}/dialogs/{dialogId}/messages/{messageId}/status/{status}
+   */
+  async updateMessageStatusInContext(userId, dialogId, messageId, status) {
+    const response = await this.client.post(
+      `/users/${userId}/dialogs/${dialogId}/messages/${messageId}/status/${status}`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get paginated list of all message statuses (history)
+   * GET /api/users/{userId}/dialogs/{dialogId}/messages/{messageId}/statuses
+   */
+  async getMessageStatuses(userId, dialogId, messageId, params = {}) {
+    const response = await this.client.get(
+      `/users/${userId}/dialogs/${dialogId}/messages/${messageId}/statuses`,
+      { params }
+    );
     return response.data;
   }
 
@@ -175,6 +227,8 @@ class Chat3Client {
 
   /**
    * Get reactions for a message
+   * Legacy method - uses old endpoint format
+   * @deprecated Use getMessageReactionsInContext instead
    */
   async getMessageReactions(messageId) {
     const response = await this.client.get(`/messages/${messageId}/reactions`);
@@ -182,10 +236,38 @@ class Chat3Client {
   }
 
   /**
+   * Get all reactions for a message
+   * GET /api/users/{userId}/dialogs/{dialogId}/messages/{messageId}/reactions
+   */
+  async getMessageReactionsInContext(userId, dialogId, messageId) {
+    const response = await this.client.get(
+      `/users/${userId}/dialogs/${dialogId}/messages/${messageId}/reactions`
+    );
+    return response.data;
+  }
+
+  /**
    * Add or update reaction
+   * Legacy method - uses old endpoint format
+   * @deprecated Use setReaction instead
    */
   async addReaction(messageId, data) {
     const response = await this.client.post(`/messages/${messageId}/reactions`, data);
+    return response.data;
+  }
+
+  /**
+   * Set or unset reaction for a message
+   * POST /api/users/{userId}/dialogs/{dialogId}/messages/{messageId}/reactions/{action}
+   * @param {string} userId - User ID
+   * @param {string} dialogId - Dialog ID
+   * @param {string} messageId - Message ID
+   * @param {string} action - Reaction emoji/action (e.g., '👍', '❤️')
+   */
+  async setReaction(userId, dialogId, messageId, action) {
+    const response = await this.client.post(
+      `/users/${userId}/dialogs/${dialogId}/messages/${messageId}/reactions/${action}`
+    );
     return response.data;
   }
 
@@ -202,6 +284,8 @@ class Chat3Client {
 
   /**
    * Remove reaction
+   * Legacy method - reactions are now toggled via setReaction
+   * @deprecated Use setReaction to toggle reaction off
    */
   async removeReaction(messageId, reaction) {
     const response = await this.client.delete(`/messages/${messageId}/reactions/${reaction}`);
@@ -209,6 +293,15 @@ class Chat3Client {
   }
 
   // ==================== USERS ====================
+
+  /**
+   * Get all users
+   * GET /api/users
+   */
+  async getUsers(params = {}) {
+    const response = await this.client.get('/users', { params });
+    return response.data;
+  }
 
   /**
    * Create user in Chat3
@@ -238,8 +331,27 @@ class Chat3Client {
   }
 
   /**
+   * Delete user
+   * DELETE /api/users/{userId}
+   */
+  async deleteUser(userId) {
+    const response = await this.client.delete(`/users/${userId}`);
+    return response.data;
+  }
+
+  /**
+   * Update user activity
+   * POST /api/users/{userId}/activity
+   */
+  async updateUserActivity(userId, data = {}) {
+    const response = await this.client.post(`/users/${userId}/activity`, data);
+    return response.data;
+  }
+
+  /**
    * Set user meta key
    * Note: Use getUser() to get user with meta tags (if included in response)
+   * @deprecated Use setMeta('user', userId, key, data) instead
    */
   async setUserMeta(userId, key, data) {
     const response = await this.client.put(`/users/${userId}/meta/${key}`, data);
@@ -248,6 +360,7 @@ class Chat3Client {
 
   /**
    * Delete user meta key
+   * @deprecated Use deleteMeta('user', userId, key) instead
    */
   async deleteUserMeta(userId, key) {
     const response = await this.client.delete(`/users/${userId}/meta/${key}`);
