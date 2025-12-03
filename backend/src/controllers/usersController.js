@@ -51,28 +51,28 @@ export async function listUsers(req, res) {
 
     // Add users
     for (const user of users) {
-      let avatar = null;
-      try {
-        const chat3User = await Chat3Client.getUser(user.userId);
-        const chat3UserData = chat3User.data || chat3User;
-        avatar =
-          chat3UserData.meta?.avatar?.value ||
-          chat3UserData.meta?.avatar ||
-          chat3UserData.avatar ||
-          null;
-      } catch (error) {
-        if (error.response?.status !== 404) {
-          console.warn(`Failed to get avatar for user ${user.userId}:`, error.message);
+        let avatar = null;
+        try {
+          const chat3User = await Chat3Client.getUser(user.userId);
+          const chat3UserData = chat3User.data || chat3User;
+          avatar =
+            chat3UserData.meta?.avatar?.value ||
+            chat3UserData.meta?.avatar ||
+            chat3UserData.avatar ||
+            null;
+        } catch (error) {
+          if (error.response?.status !== 404) {
+            console.warn(`Failed to get avatar for user ${user.userId}:`, error.message);
+          }
         }
-      }
 
       allItems.push({
-        userId: user.userId,
-        name: user.name,
-        phone: user.phone,
-        avatar,
-        createdAt: user.createdAt,
-        lastActiveAt: user.lastActiveAt,
+          userId: user.userId,
+          name: user.name,
+          phone: user.phone,
+          avatar,
+          createdAt: user.createdAt,
+          lastActiveAt: user.lastActiveAt,
         isBot: false,
       });
     }

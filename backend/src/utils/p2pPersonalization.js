@@ -85,7 +85,7 @@ export async function getP2PUserProfile(userId) {
   // First, try to get user from local MongoDB database (has name)
   // This is the primary source for user names
   try {
-    const localUser = await User.findOne({ userId }).lean().exec();
+      const localUser = await User.findOne({ userId }).lean().exec();
     if (localUser && localUser.name) {
       // Also try to get avatar from Chat3 API
       let avatar = null;
@@ -97,19 +97,19 @@ export async function getP2PUserProfile(userId) {
         // Ignore avatar fetch errors
       }
       
-      return {
-        userId: localUser.userId,
-        name: localUser.name,
-        phone: localUser.phone,
-        avatar,
-        meta: {
-          displayName: localUser.name,
-          fullName: localUser.name,
+        return {
+          userId: localUser.userId,
+          name: localUser.name,
           phone: localUser.phone,
+        avatar,
+          meta: {
+            displayName: localUser.name,
+            fullName: localUser.name,
+            phone: localUser.phone,
           avatar,
-        },
-      };
-    }
+          },
+        };
+      }
   } catch (localError) {
     console.warn(`⚠️ Failed to get user ${userId} from local DB:`, localError.message);
   }

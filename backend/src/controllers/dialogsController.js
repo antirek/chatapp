@@ -481,14 +481,14 @@ export async function getDialogs(req, res) {
       // Extract name from meta.name.value (Chat3 no longer has name property)
       const nameFromMeta = dialog.meta?.name?.value || dialog.meta?.name;
       return {
-        ...dialog,
+      ...dialog,
         // Use meta.name as fallback for dialog.name
         name: dialog.name || nameFromMeta || dialog.dialogId,
-        unreadCount: dialog.context?.unreadCount || 0,
-        lastSeenAt: dialog.context?.lastSeenAt,
-        lastMessageAt: dialog.context?.lastMessageAt,
-        isActive: dialog.context?.isActive || false,
-        joinedAt: dialog.context?.joinedAt,
+      unreadCount: dialog.context?.unreadCount || 0,
+      lastSeenAt: dialog.context?.lastSeenAt,
+      lastMessageAt: dialog.context?.lastMessageAt,
+      isActive: dialog.context?.isActive || false,
+      joinedAt: dialog.context?.joinedAt,
       };
     });
 
@@ -866,11 +866,11 @@ export async function joinPublicDialog(req, res) {
         const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message;
         if (errorMessage.toLowerCase().includes('already') || errorMessage.toLowerCase().includes('member')) {
           console.log(`ℹ️ [joinPublicDialog] User ${currentUserId} is already a member of dialog ${dialogId}`);
-          return res.status(400).json({
-            success: false,
-            error: 'User is already a member of this group',
-          });
-        }
+      return res.status(400).json({
+        success: false,
+        error: 'User is already a member of this group',
+      });
+    }
       }
       console.error(`❌ [joinPublicDialog] Step 2 FAILED:`, error.message);
       console.error(`❌ [joinPublicDialog] Step 2 error response:`, error.response?.data);
@@ -965,7 +965,7 @@ export async function getDialogById(req, res) {
 
     // Extract name from meta.name.value (Chat3 no longer has name property)
     const nameFromMeta = dialogData.meta?.name?.value || dialogData.meta?.name;
-    
+
     const dialogWithContext = {
       ...dialogData,
       // Use meta.name as fallback for dialog.name

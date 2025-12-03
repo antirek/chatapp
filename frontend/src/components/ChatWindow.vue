@@ -256,14 +256,14 @@
               class="absolute opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10"
               :class="isOwnMessage(message) ? 'top-1 right-1' : 'top-1 left-1'"
             >
-              <!-- Reply Button -->
-              <button
-                @click.stop="handleQuoteMessage(message)"
+            <!-- Reply Button -->
+            <button
+              @click.stop="handleQuoteMessage(message)"
                 class="text-xs px-2 py-1 rounded bg-white shadow-md border border-gray-200 hover:bg-gray-50 whitespace-nowrap text-gray-700 hover:text-gray-900"
-                title="Ответить"
-              >
-                Ответить
-              </button>
+              title="Ответить"
+            >
+              Ответить
+            </button>
               <!-- Pin/Unpin Button -->
               <button
                 @click.stop="handleTogglePin(message)"
@@ -704,7 +704,7 @@ function isBusinessContactSender(message: Message): boolean {
   
   // Дополнительная проверка по businessContactId для personal_contact диалогов
   if (isBusinessContact.value) {
-    const contactId = businessContactId.value
+  const contactId = businessContactId.value
     return !!contactId && message.senderId === contactId
   }
   
