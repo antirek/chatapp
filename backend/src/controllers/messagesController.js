@@ -7,6 +7,7 @@ export async function getDialogMessages(req, res) {
     const { dialogId } = req.params;
     const { page = 1, limit = 50 } = req.query;
     const currentUserId = req.user.userId;
+    console.log(`📥 [getDialogMessages] Request for dialog ${dialogId}, user ${currentUserId}, page ${page}, limit ${limit}`);
 
     let result;
     try {
@@ -15,7 +16,13 @@ export async function getDialogMessages(req, res) {
         limit,
       });
 
-      if (result.data && result.data.length > 0 && !result.data[0].statuses) {
+      // Check if statuses exist in context or top-level (for fallback check)
+      const hasStatuses = result.data && result.data.length > 0 && (
+        result.data[0].context?.statuses || 
+        result.data[0].statuses
+      );
+      
+      if (result.data && result.data.length > 0 && !hasStatuses) {
         console.log('⚠️ User context endpoint doesn\'t return statuses, falling back to standard endpoint');
         result = await Chat3Client.getDialogMessages(dialogId, {
           page,
@@ -30,10 +37,49 @@ export async function getDialogMessages(req, res) {
       });
     }
 
+    // Temporarily replace context.statuses with statusMatrix
+    // TODO: Remove this when Chat3 API properly supports statuses
+    let processedData = [];
+    console.log(`📊 [getDialogMessages] Processing ${Array.isArray(result.data) ? result.data.length : 0} messages`);
+    try {
+      processedData = Array.isArray(result.data) ? result.data.map(message => {
+        // Extract statuses from context or top-level message
+        const contextStatuses = message.context?.statuses;
+        const topLevelStatuses = message.statuses;
+        const statusesToUse = contextStatuses || topLevelStatuses;
+        
+        // Remove statuses from both context and top-level
+        const { statuses: _, ...restMessage } = message;
+        const processedMessage = { ...restMessage };
+        
+        if (processedMessage.context) {
+          const { statuses: __, ...restContext } = processedMessage.context;
+          processedMessage.context = {
+            ...restContext,
+            // statuses, // Original code - temporarily disabled
+            statusMatrix: statusesToUse || null, // Use statusMatrix instead of statuses
+          };
+        } else {
+          // If no context, create one with statusMatrix
+          processedMessage.context = {
+            statusMatrix: statusesToUse || null,
+          };
+        }
+        
+        return processedMessage;
+      }) : [];
+    } catch (error) {
+      console.error('❌ Error processing messages:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      // Return original data if processing fails
+      processedData = Array.isArray(result.data) ? result.data : [];
+    }
+
+    console.log(`✅ [getDialogMessages] Returning ${processedData.length} processed messages for dialog ${dialogId}`);
     return res.json({
       success: true,
       ...result,
-      data: Array.isArray(result.data) ? result.data : [],
+      data: processedData,
     });
   } catch (error) {
     return res.status(500).json({
