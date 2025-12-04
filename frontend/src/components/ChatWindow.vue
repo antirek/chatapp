@@ -225,6 +225,15 @@
               <span v-else-if="isOwnMessage(message)" class="text-primary-200 opacity-50" title="Отправлено">
                 ✓
               </span>
+              
+              <!-- View count for incoming messages in group chats -->
+              <span 
+                v-if="!isOwnMessage(message) && isGroupChat && getReadCount(message) > 0" 
+                class="text-gray-500 dark:text-gray-400" 
+                :title="`Просмотрено: ${getReadCount(message)}`"
+              >
+                👁 {{ getReadCount(message) }}
+              </span>
             </div>
 
             <!-- Reactions -->
@@ -834,6 +843,35 @@ function getTimestampClasses(message: Message): string {
     return isImageMessage(message) ? 'text-gray-500' : 'text-primary-100'
   }
   return 'text-gray-400'
+}
+
+/**
+ * Получает количество просмотров сообщения из statusMatrix
+ * Для групповых чатов возвращает количество пользователей типа "user", которые прочитали сообщение
+ */
+function getReadCount(message: Message): number {
+  // Проверяем statusMatrix в context
+  const statusMatrix = message.context?.statusMatrix || message.statusMessageMatrix
+  
+  if (!statusMatrix || !Array.isArray(statusMatrix)) {
+    return 0
+  }
+  
+  // Ищем агрегированную запись с status="read" и userType="user"
+  const readEntry = statusMatrix.find(
+    (entry: any) => entry.status === 'read' && entry.userType === 'user'
+  )
+  
+  if (readEntry && typeof readEntry.count === 'number') {
+    return readEntry.count
+  }
+  
+  // Если формат не агрегированный, считаем количество записей со status="read" и userType="user"
+  const readStatuses = statusMatrix.filter(
+    (entry: any) => entry.status === 'read' && entry.userType === 'user'
+  )
+  
+  return readStatuses.length
 }
 
 function isMessageRead(message: Message): boolean {

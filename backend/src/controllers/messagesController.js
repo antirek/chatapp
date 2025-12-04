@@ -187,13 +187,38 @@ export async function sendDialogMessage(req, res) {
 export async function getMessageById(req, res) {
   try {
     const { messageId } = req.params;
-    const result = await Chat3Client.getMessage(messageId);
+    const currentUserId = req.user.userId;
 
-    const messageData = result?.data ? await enrichMessages([result.data], req.user) : [result.data];
+    // Сначала получаем сообщение, чтобы узнать dialogId
+    const messageResult = await Chat3Client.getMessage(messageId);
+    const message = messageResult?.data || messageResult;
+    
+    if (!message || !message.dialogId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+      });
+    }
+
+    // Получаем сообщение с контекстом пользователя
+    let result;
+    try {
+      // Пробуем получить сообщение с контекстом пользователя
+      result = await Chat3Client.getUserMessage(currentUserId, message.dialogId, messageId);
+    } catch (error) {
+      // Если не получилось, используем обычное сообщение
+      if (error.response?.status === 404 || error.response?.status === 400) {
+        result = messageResult;
+      } else {
+        throw error;
+      }
+    }
+
+    const messageData = result?.data || result || message;
 
     return res.json({
       success: true,
-      data: messageData[0],
+      data: messageData,
     });
   } catch (error) {
     return res.status(500).json({
