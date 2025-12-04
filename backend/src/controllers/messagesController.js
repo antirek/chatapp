@@ -16,9 +16,9 @@ export async function getDialogMessages(req, res) {
         limit,
       });
 
-      // Check if statuses exist in context or top-level (for fallback check)
+      // Check if statusMatrix exists in context or top-level statuses (for fallback check)
       const hasStatuses = result.data && result.data.length > 0 && (
-        result.data[0].context?.statuses || 
+        result.data[0].context?.statusMatrix || 
         result.data[0].statuses
       );
       
@@ -37,27 +37,26 @@ export async function getDialogMessages(req, res) {
       });
     }
 
-    // Temporarily replace context.statuses with statusMatrix
-    // TODO: Remove this when Chat3 API properly supports statuses
+    // Normalize statuses to statusMatrix format
     let processedData = [];
     console.log(`📊 [getDialogMessages] Processing ${Array.isArray(result.data) ? result.data.length : 0} messages`);
     try {
       processedData = Array.isArray(result.data) ? result.data.map(message => {
-        // Extract statuses from context or top-level message
-        const contextStatuses = message.context?.statuses;
+        // Extract statuses from context.statusMatrix or top-level message.statuses
+        const contextStatusMatrix = message.context?.statusMatrix;
         const topLevelStatuses = message.statuses;
-        const statusesToUse = contextStatuses || topLevelStatuses;
+        const statusesToUse = contextStatusMatrix || topLevelStatuses;
         
-        // Remove statuses from both context and top-level
+        // Remove statuses from top-level (we'll use statusMatrix in context)
         const { statuses: _, ...restMessage } = message;
         const processedMessage = { ...restMessage };
         
         if (processedMessage.context) {
+          // Remove statuses from context, keep only statusMatrix
           const { statuses: __, ...restContext } = processedMessage.context;
           processedMessage.context = {
             ...restContext,
-            // statuses, // Original code - temporarily disabled
-            statusMatrix: statusesToUse || null, // Use statusMatrix instead of statuses
+            statusMatrix: statusesToUse || null, // Use statusMatrix only
           };
         } else {
           // If no context, create one with statusMatrix

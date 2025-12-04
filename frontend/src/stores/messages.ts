@@ -162,15 +162,16 @@ export const useMessagesStore = defineStore('messages', () => {
     
     // Find message by messageId (primary) or _id (fallback)
     const index = messages.value.findIndex(m => 
-      m.messageId === messageId || m._id === messageId
+      (m.messageId && m.messageId === messageId) || (m._id && m._id === messageId)
     )
     if (index === -1) {
       console.log('❌ Message not found for update:', messageId)
+      console.log('📋 Available message IDs:', messages.value.map(m => m.messageId || m._id).slice(0, 5))
       return
     }
     
     const message = messages.value[index]
-    console.log('🛠️ Found message:', message)
+    console.log('🛠️ Found message:', { messageId: message.messageId || message._id, hasStatuses: !!message.statuses })
     console.log('🛠️ Checking if status update:', { has_status: !!updates.status, has_userId: !!updates.userId })
     
     // Special handling for status updates
@@ -179,7 +180,14 @@ export const useMessagesStore = defineStore('messages', () => {
       console.log('🔄 Status update:', { messageId, userId: updates.userId, status: updates.status })
       
       // Create new statuses array to trigger reactivity
-      const currentStatuses = message.statuses || []
+      // Get statuses from message.statuses or context.statusMatrix
+      let currentStatuses: any[] = []
+      if (message.statuses && Array.isArray(message.statuses)) {
+        currentStatuses = message.statuses
+      } else if (message.context?.statusMatrix && Array.isArray(message.context.statusMatrix)) {
+        currentStatuses = message.context.statusMatrix
+      }
+      
       const statusIndex = currentStatuses.findIndex((s: any) => s.userId === updates.userId)
       
       let newStatuses
@@ -189,21 +197,28 @@ export const useMessagesStore = defineStore('messages', () => {
         newStatuses[statusIndex] = {
           ...newStatuses[statusIndex],
           status: updates.status,
-          createdAt: updates.updatedAt || newStatuses[statusIndex].createdAt
+          createdAt: updates.createdAt || updates.updatedAt || newStatuses[statusIndex].createdAt
         }
       } else {
         // Add new status
         newStatuses = [...currentStatuses, {
           userId: updates.userId,
           status: updates.status,
-          createdAt: updates.createdAt || updates.updatedAt
+          createdAt: updates.createdAt || updates.updatedAt || Date.now()
         }]
       }
       
       // Create new message object and new array to trigger reactivity
       const updatedMessage = ensureNormalizedMessage({
         ...message,
-        statuses: newStatuses
+        statuses: newStatuses,
+        // Also update context.statusMatrix if it exists
+        ...(message.context ? {
+          context: {
+            ...message.context,
+            statusMatrix: newStatuses
+          }
+        } : {})
       })
       
       // Replace entire array to trigger reactivity

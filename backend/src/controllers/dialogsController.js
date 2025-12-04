@@ -1582,30 +1582,51 @@ export async function getPinnedMessage(req, res) {
       });
     }
 
-    // Get pinned message meta
-    let pinnedMeta;
+    // Get dialog to retrieve pinned message from meta
+    let dialog;
     try {
-      const metaResponse = await Chat3Client.getMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY);
-      pinnedMeta = metaResponse?.data || metaResponse;
+      const dialogResponse = await Chat3Client.getDialog(dialogId);
+      dialog = dialogResponse?.data || dialogResponse;
     } catch (error) {
       if (error.response?.status === 404) {
-        // No pinned message
-        return res.json({
-          success: true,
-          data: null,
+        return res.status(404).json({
+          success: false,
+          error: 'Dialog not found',
         });
       }
       throw error;
     }
 
-    if (!pinnedMeta || !pinnedMeta.value) {
+    // Get pinned message ID from dialog meta
+    // pinnedMessage can be stored as:
+    // 1. dialog.meta.pinnedMessage (string) - direct value
+    // 2. dialog.meta.pinnedMessage.value (string) - nested value
+    // 3. dialog.meta.pinnedMessage.value (object with pinnedAt, pinnedBy) - full object
+    const pinnedMessageMeta = dialog?.meta?.[PINNED_MESSAGE_META_KEY];
+    let messageId = null;
+    let pinnedAt = null;
+    let pinnedBy = null;
+
+    if (pinnedMessageMeta) {
+      if (typeof pinnedMessageMeta === 'string') {
+        // Direct string value
+        messageId = pinnedMessageMeta;
+      } else if (pinnedMessageMeta.value) {
+        // Nested value
+        messageId = typeof pinnedMessageMeta.value === 'string' 
+          ? pinnedMessageMeta.value 
+          : pinnedMessageMeta.value.value || pinnedMessageMeta.value;
+        pinnedAt = pinnedMessageMeta.pinnedAt || pinnedMessageMeta.value.pinnedAt;
+        pinnedBy = pinnedMessageMeta.pinnedBy || pinnedMessageMeta.value.pinnedBy;
+      }
+    }
+
+    if (!messageId) {
       return res.json({
         success: true,
         data: null,
       });
     }
-
-    const messageId = pinnedMeta.value;
 
     // Get the actual message
     let message;
@@ -1619,12 +1640,15 @@ export async function getPinnedMessage(req, res) {
       }
     } catch (error) {
       if (error.response?.status === 404 || error.message === 'Message data is empty') {
-        // Message was deleted, remove pinned meta
+        // Message was deleted, remove pinned meta from dialog
         console.warn(`⚠️ [getPinnedMessage] Pinned message ${messageId} not found, removing pin`);
         try {
+          // Try to remove via deleteMeta, but if it fails, we'll update dialog meta directly
           await Chat3Client.deleteMeta('dialog', dialogId, PINNED_MESSAGE_META_KEY);
         } catch (deleteError) {
-          console.error('Failed to remove invalid pinned message meta:', deleteError);
+          // If deleteMeta fails, just log the error
+          // We can't update dialog meta directly as there's no updateDialog method
+          console.warn('deleteMeta failed, pinned message meta will remain in dialog.meta:', deleteError.message);
         }
         return res.json({
           success: true,
@@ -1638,8 +1662,8 @@ export async function getPinnedMessage(req, res) {
       success: true,
       data: {
         message,
-        pinnedAt: pinnedMeta.pinnedAt,
-        pinnedBy: pinnedMeta.pinnedBy,
+        pinnedAt: pinnedAt || message.createdAt,
+        pinnedBy: pinnedBy || message.senderId,
       },
     });
   } catch (error) {

@@ -24,6 +24,9 @@ class Chat3Client {
     // Add API key if provided
     if (config.chat3.apiKey) {
       this.client.defaults.headers.common['X-API-Key'] = config.chat3.apiKey;
+      console.log('🔑 [Chat3Client] API Key configured:', config.chat3.apiKey.substring(0, 20) + '...');
+    } else {
+      console.warn('⚠️  [Chat3Client] No API key provided!');
     }
 
     // Add logging in development

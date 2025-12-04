@@ -67,9 +67,29 @@ export function normalizeMessageType(
 
 export function ensureNormalizedMessage(message: Message): Message {
   const normalizedType = normalizeMessageType(message.type, message.meta)
+  
+  // Normalize statuses: convert context.statusMatrix to statuses if needed
+  let statuses = message.statuses
+  if (!statuses || !Array.isArray(statuses)) {
+    // Get statuses from context.statusMatrix only
+    if (message.context?.statusMatrix && Array.isArray(message.context.statusMatrix)) {
+      statuses = message.context.statusMatrix
+    } else {
+      statuses = []
+    }
+  }
+  
   return {
     ...message,
-    normalizedType
+    normalizedType,
+    statuses,
+    // Ensure context.statusMatrix is also set for consistency
+    ...(message.context ? {
+      context: {
+        ...message.context,
+        statusMatrix: statuses
+      }
+    } : {})
   }
 }
 
