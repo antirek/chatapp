@@ -1,639 +1,888 @@
-# 🤝 Интеграция внешних систем с Chat3
+# Интеграция с Chat3
 
-Комплексное руководство для команд, подключающих сторонние сервисы к Chat3. Документ можно передавать подрядчикам «как есть» — он описывает весь стек доступных интерфейсов, протоколов и требований.
+## Обзор
 
----
+Этот документ описывает процесс интеграции внешних систем с Chat3 через RabbitMQ для получения событий и обновлений в реальном времени.
 
-## 📘 Обзор возможностей
+## Архитектура интеграции
 
-- **REST API** для управления сущностями (тенанты, диалоги, сообщения, статусы, реакции, мета-теги, пользователи).
-- **Event-driven модель**: каждое действие фиксируется как событие и публикуется в RabbitMQ.
-- **Персональные обновления** (Updates) для конечных пользователей с маршрутизацией по `userId`.
-- **Гибкая фильтрация и сортировка** по метаданным и произвольным полям.
-- **Мультитенантность**: изоляция данных через API ключи и разделение по `tenantId`.
-- **Готовность к масштабированию**: Docker, RabbitMQ, горизонтальные воркеры.
-
----
-
-## 🔐 Аутентификация, окружение и форматы данных
-
-### API ключи и права
-
-- Каждый HTTP запрос к REST API обязан содержать заголовок `x-api-key`.
-- Ключи выдаются на тенант и несут права:
-  - `read` — запросы `GET`.
-  - `write` — операции `POST`, `PUT`, `PATCH`.
-  - `delete` — операции `DELETE`.
-- При попытке выполнить запрос без требуемого права вернётся `403 Forbidden`.
-- Ключи управляются через AdminJS (`/admin`) или скрипты:
-  - `node scripts/generateApiKey.js`
-  - `node scripts/generateDemoApiKey.js`
-
-### Базовые URL и окружение
-
-- REST API: `http://localhost:3000/api` (в production — HTTPS).
-- Admin панель: `http://localhost:3000/admin`.
-- RabbitMQ (по умолчанию): `amqp://rmuser:rmpassword@localhost:5672/`.
-- Worker: `node src/workers/updateWorker.js` (или `./start-worker.sh`).
-
-### Переменные окружения
-
-| Переменная | Назначение | Значение по умолчанию |
-|------------|------------|------------------------|
-| `MONGODB_URI` | Подключение к MongoDB | `mongodb://localhost:27017/chat3` |
-| `RABBITMQ_HOST` | Хост RabbitMQ | `localhost` |
-| `RABBITMQ_PORT` | Порт RabbitMQ | `5672` |
-| `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | Учетные данные | `rmuser` / `rmpassword` |
-| `RABBITMQ_VHOST` | Виртуальный хост | `/` |
-| `RABBITMQ_URL` | Полный URL (если указан, перекрывает поля выше) | — |
-| `RABBITMQ_EXCHANGE_EVENTS` | Exchange событий | `chat3_events` |
-| `RABBITMQ_EXCHANGE_UPDATES` | Exchange обновлений | `chat3_updates` |
-
-### Форматы данных
-
-- Все payload'ы и ответы — JSON (UTF-8).
-- Идентификаторы — строки вида MongoDB `ObjectId` (`64fa1cca6f...`).
-- Временные метки — ISO-8601 (UTC) или числа миллисекунд Unix.
-- Валидация входящих данных осуществляется через Joi; ошибки возвращают `400 Bad Request` с деталями.
-
-### Обработка ошибок
-
-- `400` — ошибка валидации или некорректный фильтр.
-- `401` — отсутствует API ключ.
-- `403` — недостаточно прав.
-- `404` — сущность не найдена либо не принадлежит текущему tenant.
-- `409` — конфликт (например, повторное добавление участника).
-- `422` — бизнес-правила (например, недопустимый тип сообщения).
-- `500` — внутренняя ошибка (логируется, рекомендуется повторить с backoff).
-
----
-
-## 🌐 REST API
-
-### Каталог операций
-
-| Категория | Endpoint | Описание | Требуемые права |
-|-----------|----------|----------|-----------------|
-| Tenants | `GET/POST/PUT/DELETE /tenants` | Управление организациями (редко используется внешними системами). | read/write/delete |
-| Dialogs | `GET /dialogs` | Список диалогов с фильтрами, сортировкой, пагинацией; участники не включаются, поле `memberCount` показывает количество участников. | read |
-| Dialogs | `POST /dialogs` | Создание диалога с опциональным массивом участников (`members`) и мета-тегами. Участники автоматически создаются в коллекции `User`, если их нет. | write |
-| Dialogs | `GET /dialogs/:dialogId` | Детали диалога и мета-информация без списка участников; доступно поле `memberCount`. | read |
-| Dialogs | `GET /dialogs/:dialogId/members` | Пагинированный список участников диалога с фильтрами `queryParser` и `meta.*`. | read |
-| Dialogs | `DELETE /dialogs/:dialogId` | Удаление диалога. | delete |
-| Dialog Members | `POST /dialogs/{dialogId}/member/{userId}/typing` | Сигнал "пользователь печатает" (идемпотентен 1 с). | write |
-| Messages | `GET /dialogs/:dialogId/messages` | Сообщения в диалоге с фильтрами. | read |
-| Messages | `POST /dialogs/:dialogId/messages` | Отправка сообщения (`content`, `type`, `meta`, `quotedMessageId`). | write |
-| Messages | `GET /messages` | Глобальный поиск сообщений (все диалоги). | read |
-| Message Status | `POST /messages/:messageId/status/:userId/:status` | Установка статусов (`unread`, `delivered`, `read`). | write |
-| Message Reactions | `GET /messages/:messageId/reactions` | Получение реакций. | read |
-| Message Reactions | `POST /messages/:messageId/reactions` | Добавление/обновление реакции. | write |
-| Message Reactions | `DELETE /messages/:messageId/reactions/:reactionId` | Удаление реакции. | delete |
-| Dialog Members | `POST /dialogs/:dialogId/members/add` | Добавление участника. `userId`, `type`, `name` передаются в теле запроса. Пользователь автоматически создается в коллекции `User`, если его нет. | write |
-| Dialog Members | `POST /dialogs/:dialogId/members/:userId/remove` | Удаление участника. | delete |
-| Dialog Members | `PATCH /dialogs/:dialogId/members/:userId/unread` | Принудительно уменьшить `unreadCount` (отметить сообщения прочитанными). | write |
-| Users | `GET /users` | Список пользователей; `includeDialogCount=true` добавляет счётчик диалогов; `filter` в формате `(поле,оператор,значение)` (через `queryParser`) поддерживает `userId`, `name`, `meta.*`. | read |
-| Users | `GET /users/:userId` | Информация о пользователе, включая поле `type` (тип пользователя: `user`, `bot`, `contact` и т.д.). | read |
-| Users | `POST /users` | Создание пользователя. Можно указать `type` (опционально, по умолчанию `user`). **Ограничение**: `userId` не может содержать точку (`.`). | write |
-| Users | `PUT /users/:userId` | Обновление пользователя. Можно изменить `name` и `type`. **Ограничение**: `userId` в URL не может содержать точку (`.`). | write |
-| Users | `GET /users/:userId/dialogs` | Диалоги конкретного пользователя с фильтрами. | read |
-| Meta | `GET/PUT/DELETE /meta/:entityType/:entityId/:key` | Работа с мета-тегами любой сущности. | read/write/delete |
-
-> **Scope для мета-тегов**
-> - Любой мета-тег можно записать с дополнительным контекстом `scope` (обычно `userId`). В `PUT /meta/...` поле `scope` в теле позволяет хранить персонализированное значение.
-> - `GET /meta/...` и пользовательские эндпоинты (например, `GET /users/:userId/dialogs`) сначала ищут значение в переданном `scope`, затем возвращают глобальное (без scope). Укажите `?scope=user_42`, чтобы явно запросить персональное значение; по умолчанию берётся `scope = userId` из URL (если применимо) или глобальное значение.
-> - `DELETE /meta/...` принимает `?scope=...` и удаляет только запись внутри указанного контекста; без параметра удаляется глобальный мета-тег.
-
-> Полные описания полей и примеры см. в `docs/API.md` (REST) и `docs/FILTER_RULES.md` (фильтры).
-
-- Ответы `GET /messages` и `GET /dialogs/:dialogId/messages` содержат объект `senderInfo`, если пользователь с `senderId` существует. В структуру входят `userId`, `name`, `type` (тип пользователя), временные метки и `meta` (все мета-теги пользователя).
-
-#### Управление типом пользователя
-
-- При создании пользователя (`POST /users`) можно указать поле `type` (опционально, по умолчанию `user`). Тип используется в routing keys для RabbitMQ updates.
-- При обновлении пользователя (`PUT /users/:userId`) можно изменить поле `type`.
-- Тип пользователя влияет на routing key в формате `user.{type}.{userId}.{updateType}`:
-  - Если пользователь существует в БД, используется значение поля `type` из модели `User`.
-  - Если пользователь не найден в БД, используется fallback: извлечение типа из префикса `userId` или `usr` по умолчанию.
-- Примеры типов: `user` (обычный пользователь), `bot` (бот), `contact` (контакт), `agent` (агент) и т.д.
-
-#### Валидация userId
-
-- **Запрет точки**: `userId` не может содержать символ точки (`.`). Это ограничение применяется как при создании пользователя через `POST /users` (в теле запроса), так и при обращении к эндпоинтам с `userId` в URL (например, `GET /users/:userId`, `PUT /users/:userId`).
-- При попытке использовать `userId` с точкой API вернёт ошибку `400 Bad Request` с сообщением: `"userId не может содержать точку"`.
-- Примеры:
-  - ✅ Допустимо: `usr_123`, `bot_456`, `carl`, `agent_789`
-  - ❌ Недопустимо: `user.test`, `bot.example.com`, `usr.123`
-
-#### Создание диалога с участниками
-
-При создании диалога (`POST /dialogs`) можно сразу указать массив участников в поле `members`. Каждый участник должен содержать обязательное поле `userId` и опциональные поля `type` и `name`:
-
-```json
-{
-  "name": "VIP чат",
-  "createdBy": "agent_42",
-  "members": [
-    {
-      "userId": "carl",
-      "type": "user",
-      "name": "Carl Johnson"
-    },
-    {
-      "userId": "bot_123",
-      "type": "bot",
-      "name": "Support Bot"
-    }
-  ],
-  "meta": {
-    "channel": "whatsapp"
-  }
-}
+```mermaid
+graph LR
+    A[Chat3 API] -->|События| B[RabbitMQ Events]
+    B -->|Обработка| C[Update Worker]
+    C -->|Updates| D[RabbitMQ Updates]
+    D -->|Подписка| E[Ваша система]
+    E -->|Обработка| F[Локальное состояние]
 ```
 
-**Автоматическое создание пользователей:**
-- При создании диалога с участниками или при добавлении участника система автоматически проверяет существование пользователя в коллекции `User`.
-- Если пользователь не существует, он создается автоматически с указанными полями (`userId`, `type`, `name`).
-- Если пользователь уже существует, опциональные поля (`type`, `name`) обновляются, если они предоставлены и отличаются от текущих значений.
+## Предварительные требования
 
-#### Добавление участника в диалог
+1. **RabbitMQ подключение**
+   - URL: `amqp://rmuser:rmpassword@localhost:5672/`
+   - Exchange: `chat3_events` (topic)
+   - Exchange: `chat3_updates` (topic)
 
-Для добавления участника используйте `POST /dialogs/:dialogId/members/add`. Формат запроса:
+2. **API ключ Chat3**
+   - Получить через `npm run generate-key`
+   - Использовать в заголовке `X-API-Key`
 
-```json
-{
-  "userId": "carl",
-  "type": "user",
-  "name": "Carl Johnson"
-}
-```
+3. **Tenant ID**
+   - По умолчанию: `tnt_default`
+   - Или создать свой через API
 
-- `userId` — обязательное поле (ID пользователя).
-- `type` — опциональное поле (тип пользователя: `user`, `bot`, `contact` и т.д.).
-- `name` — опциональное поле (имя пользователя).
+## Подключение к RabbitMQ
 
-Пользователь автоматически создается в коллекции `User`, если его нет.
-
-#### Получение участников диалога
-
-- `GET /api/dialogs/:dialogId` возвращает только основные поля диалога и его `meta`.
-- Для списка участников используйте `GET /api/dialogs/:dialogId/members?page=1&limit=50&filter=(role,eq,agent)`.
-- Поддерживаются все операторы `queryParser`, включая `meta.*` (например, `(meta.shift,eq,day)`), а также сортировка по `joinedAt`, `lastSeenAt`, `lastMessageAt`, `unreadCount`, `userId`, `role`, `isActive`.
-- Сброс непрочитанных из внешней системы: `PATCH /api/dialogs/:dialogId/members/:userId/unread` с `{"unreadCount":0}` (или любым числом <= текущего количества). Можно передать опциональные поля `lastSeenAt` (микросекунды) и `reason` для аудита. После успешного сброса создаётся фонова задача, которая отмечает все сообщения диалога как прочитанные (без генерации событий `message.status.*`), поэтому синхронизация `MessageStatus` может занимать несколько секунд.
-
-### Фильтрация, сортировка и пагинация
-
-- Пагинация: `page` (>=1, по умолчанию 1), `limit` (1–100, по умолчанию 20).
-- Сортировка: `sort[field]=asc|desc`. Для нескольких полей повторите параметр.
-- Фильтры передаются как JSON-строки в query-параметрах. Примеры:
-  - `GET /dialogs?member={"$all":["agent_1","agent_2"]}`
-  - `GET /dialogs?meta.channelType={"$in":["whatsapp","telegram"]}`
-  - `GET /dialogs?unreadCount={"$gte":5}`
-- Допустимые операторы: `$eq`, `$ne`, `$in`, `$nin`, `$all`, `$gte`, `$gt`, `$lte`, `$lt`, `$exists`, `regex`, `exact`.
-- Объект `meta` можно фильтровать по вложенным ключам (`meta.channelType`).
-- Некорректное поле или оператор вызовет `400` с текстом `Invalid filter parameter`.
-- Для `GET /users` используйте такой же синтаксис `filter`, как в `GET /dialogs`. Примеры: `(userId,regex,carl)`; `(name,eq,Alice)`; `(meta.role,eq,manager)`; `(userId,regex,bot)&(meta.region,regex,europe)`.
-
-### Индикатор набора текста
-
-- `POST /dialogs/{dialogId}/member/{userId}/typing` сообщает всем участникам диалога, что пользователь начал печатать.
-- Тело запроса пустое. Аутентификация и права — стандартные (`write`).
-- Эндпоинт идемпотентен в течение 1 секунды, поэтому фронтенд достаточно вызывать его периодически (рекомендуемый интервал — 700–1000 мс).
-- В ответ сервер вернёт `202 Accepted` и рекомендуемый `expiresInMs` (по умолчанию 5000 мс), чтобы клиенты знали, когда скрывать индикатор при отсутствии повторных сигналов.
-- Событие `dialog.typing` публикуется в RabbitMQ (`chat3_events`), после чего Update Worker формирует `Typing`-обновления (routing key `user.{type}.{userId}.typing`) в `chat3_updates`. По истечении таймаута клиенты самостоятельно скрывают индикатор, специального `isTyping: false` нет.
-
-### Типы сообщений и вложений
-
-- Разрешены три семейства типов:
-  - Встроенные (`internal.*`): `internal.text`, `internal.image`, `internal.file`, `internal.audio`, `internal.video`, `internal.location`, `internal.contact`.
-  - Системные (`system.*`): любая строка, соответствующая `system.<slug>` (латиница/цифры, допускаются точка, дефис, подчёркивание). Используйте для технических уведомлений и сервисных событий (например, `system.text`, `system.announcement`).
-  - Пользовательские (`user.*`): любые, соответствующие `user.<slug>` (латиница/цифры, допускаются точка, дефис, подчёркивание).
-
-#### Обязательные поля и примеры для `internal.*`
-
-| Тип | Обязательные поля | Дополнительно |
-|-----|-------------------|---------------|
-| `internal.text` | `senderId`, `content` (1–10 000 символов) | `meta` опционален, `quotedMessageId` опционален |
-| `internal.image` | `senderId`, `meta.url` | `content` — подпись к изображению (опционально), `meta` может содержать `mimeType`, `size`, `width`, `height` и т.д. |
-| `internal.file` | `senderId`, `meta.url` | `content` — подпись, `meta` может хранить `mimeType`, `size`, `fileName` |
-| `internal.video` | `senderId`, `meta.url` | Дополнительно `meta.previewUrl`, `duration` и т.д. |
-| `internal.audio` | `senderId`, `meta.url` | Дополнительно `meta.duration`, `meta.waveform` и др. |
-
-> ℹ️ Сообщения с типом `system.*` считаются техническими: они не создают записей `MessageStatus` и не увеличивают `unreadCount` для участников диалога.
-
-```json
-{
-  "senderId": "agent_42",
-  "type": "internal.text",
-  "content": "Привет! Чем помочь?"
-}
-```
-
-```json
-{
-  "senderId": "agent_42",
-  "type": "internal.image",
-  "content": "Вот фото товара",
-  "meta": {
-    "url": "https://cdn.example.com/images/item-42.jpg",
-    "mimeType": "image/jpeg",
-    "size": 482193,
-    "width": 1280,
-    "height": 720
-  }
-}
-```
-
-```json
-{
-  "senderId": "agent_42",
-  "type": "internal.file",
-  "meta": {
-    "url": "https://cdn.example.com/docs/manual.pdf",
-    "mimeType": "application/pdf",
-    "size": 912344,
-    "fileName": "manual.pdf"
-  }
-}
-```
-- При отсутствии `type` автоматически ставится `internal.text`.
-- Поле `meta` допускает строки, числа, булевы, массивы и объекты.
-- В теле сообщения не отправляются бинарные данные — используйте ссылки в `meta` (например, `attachmentUrl`).
-
-### Цитирование сообщений
-
-При создании сообщения можно указать `quotedMessageId` для цитирования другого сообщения. Цитируемое сообщение будет автоматически найдено, обогащено мета-тегами и информацией об отправителе (`senderInfo`), и добавлено в создаваемое сообщение как объект `quotedMessage`.
-
-**Параметры:**
-- `quotedMessageId` (опционально) — строка в формате `msg_` + 20 символов (например, `msg_7c4xtkt4bhcmfn49rjvr`). Должно соответствовать существующему сообщению в том же tenant.
-
-**Что происходит:**
-1. После сохранения нового сообщения в БД система ищет цитируемое сообщение по `quotedMessageId`.
-2. Загружаются мета-теги цитируемого сообщения и информация об его отправителе (`senderInfo`).
-3. Формируется объект `quotedMessage` со следующей структурой:
-   ```json
-   {
-     "messageId": "msg_7c4xtkt4bhcmfn49rjvr",
-     "dialogId": "dlg_abc123def456ghi789j",
-     "senderId": "carl",
-     "content": "Исходное сообщение",
-     "type": "internal.text",
-     "createdAt": 1699447823512,
-     "updatedAt": 1699447823512,
-     "meta": {
-       "channelType": "whatsapp"
-     },
-     "senderInfo": {
-       "userId": "carl",
-       "name": "Carl Smith",
-       "lastActiveAt": 1699447800000,
-       "createdAt": 1699000000000,
-       "updatedAt": 1699447800000,
-       "meta": {
-         "role": "manager"
-       }
-     }
-   }
-   ```
-4. `quotedMessage` сохраняется в документе нового сообщения в БД.
-5. `quotedMessage` включается в событие `message.create` (в поле `data.quotedMessage`).
-6. `quotedMessage` автоматически попадает в Updates через `buildFullMessagePayload`.
-
-**Важно:**
-- Если цитируемое сообщение не найдено, создание нового сообщения не прерывается, но `quotedMessage` будет `null`.
-- Цитируемое сообщение должно принадлежать тому же `tenantId`, что и новое сообщение.
-- `quotedMessage` содержит полную информацию, включая мета-теги и `senderInfo`, что позволяет отображать цитату без дополнительных запросов.
-
-### Пример создания сообщения
-
-```bash
-curl -X POST http://localhost:3000/api/dialogs/64fa1cca6f/messages \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: <YOUR_API_KEY>" \
-  -d '{
-    "senderId": "agent_42",
-    "type": "internal.text",
-    "content": "Привет! Чем помочь?",
-    "meta": {
-      "channelType": "whatsapp",
-      "integrationId": "crm_1234",
-      "externalMessageId": "crm-msg-987"
-    }
-  }'
-```
-
-**Пример с цитированием сообщения:**
-
-```bash
-curl -X POST http://localhost:3000/api/dialogs/64fa1cca6f/messages \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: <YOUR_API_KEY>" \
-  -d '{
-    "senderId": "agent_42",
-    "type": "internal.text",
-    "content": "Отвечаю на ваше сообщение",
-    "quotedMessageId": "msg_7c4xtkt4bhcmfn49rjvr",
-    "meta": {
-      "channelType": "whatsapp"
-    }
-  }'
-```
-
-В ответе и в событиях/updates будет включено поле `quotedMessage` с полной информацией о цитируемом сообщении.
-
-Ответ содержит созданный документ `Message` и связанные `Event`/`Update` будут опубликованы асинхронно.
-
----
-
-## 🐇 Поток событий (RabbitMQ `chat3_events`)
-
-### Общая схема
-
-- Exchange: `chat3_events` (тип `topic`).
-- Routing key: `{entityType}.{action}.{tenantId}`, например `message.create.tnt_default`.
-- Очередь по умолчанию: `chat3_events` (durable, TTL 3600000 мс).
-- Максимальный размер payload — 256 KB.
-- Сообщения публикуются синхронно после записи в MongoDB.
-
-### Структура события
-
-```json
-{
-  "_id": "6550d9ce3a2f4c4b5e0a1d22",
-  "tenantId": "tnt_default",
-  "eventType": "message.create",
-  "entityType": "message",
-  "entityId": "6550d9ce3a2f4c4b5e0a1d11",
-  "actorId": "agent_42",
-  "actorType": "user",
-  "data": {
-    "dialogId": "6550d8af9b6e9a28f4f74007",
-    "dialogName": "Поддержка",
-    "messageType": "internal.text",
-    "content": "Привет! Чем помочь?",
-    "meta": {
-      "channelType": "whatsapp"
-    }
-  },
-  "metadata": {
-    "ipAddress": "203.0.113.10",
-    "userAgent": "ExternalService/1.0",
-    "apiKeyId": "654fff125a1f0d2fbd2c92e7",
-    "source": "api"
-  },
-  "createdAt": "2025-11-08T10:10:23.512Z"
-}
-```
-
-### Каталог событий
-
-| Категория | События | Комментарий |
-|-----------|---------|-------------|
-| Dialog | `dialog.create`, `dialog.update`, `dialog.delete` | Имя, участники, мета-теги. |
-| Dialog Members | `dialog.member.add`, `dialog.member.remove`, `dialog.member.update` | Участник, роль, мета участника. |
-| Message | `message.create`, `message.update`, `message.delete` | Контент, тип, мета, reactions. |
-| Message Status | `message.status.create`, `message.status.update` | Изменение статусов `unread/delivered/read`; `MessageUpdate` содержит полное сообщение с `meta`, `statuses`, `senderInfo`. |
-| Message Reaction | `message.reaction.add`, `message.reaction.update`, `message.reaction.remove` | Счётчики реакций. |
-| Dialog Typing | `dialog.typing` | Сигнал о том, что конкретный пользователь печатает (экспирация на клиенте). |
-
-### Лучшие практики при подписке
-
-- Используйте `channel.prefetch(<N>)`, чтобы контролировать параллелизм обработки.
-- Всегда вызывать `channel.ack(msg)` после успешной обработки или `channel.nack(msg, false, true)` для повторной доставки.
-- При ошибках рекомендуется публиковать сообщение в DLX либо логировать с ID события.
-- При потере соединения используйте экспоненциальный backoff; библиотека `amqplib` не переподключается автоматически.
-- Не храните курсоры — используйте `eventId` или `createdAt` для идемпотентной обработки.
-
-### Пример подписчика (Node.js)
+### Node.js пример
 
 ```javascript
 import amqp from 'amqplib';
 
-async function subscribeToEvents() {
-  const connection = await amqp.connect(process.env.RABBITMQ_URL);
+const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://rmuser:rmpassword@localhost:5672/';
+const UPDATES_EXCHANGE = 'chat3_updates';
+
+async function connectToChat3() {
+  const connection = await amqp.connect(RABBITMQ_URL);
   const channel = await connection.createChannel();
-
-  const exchange = 'chat3_events';
-  const queue = 'chat3_events';
-
-  await channel.assertExchange(exchange, 'topic', { durable: true });
-  await channel.assertQueue(queue, {
-    durable: true,
-    arguments: { 'x-message-ttl': 3600000 }
-  });
-  await channel.bindQueue(queue, exchange, '#');
-  channel.prefetch(10);
-
-  channel.consume(queue, (msg) => {
-    if (!msg) return;
-    try {
-      const event = JSON.parse(msg.content.toString());
-      console.log('[event]', event.eventType, event.entityId);
-      // обработка ...
-      channel.ack(msg);
-    } catch (err) {
-      console.error('Failed to handle event', err);
-      channel.nack(msg, false, true); // повторить
-    }
-  });
-
-  connection.on('close', () => console.warn('RabbitMQ connection closed, retrying...'));
-  connection.on('error', (err) => console.error('RabbitMQ error', err));
-}
-
-subscribeToEvents().catch(console.error);
-```
-
----
-
-## 🔄 Персональные обновления (RabbitMQ `chat3_updates`)
-
-### Назначение
-
-Updates — материалы для конечных клиентов. На их основе фронтенд строит ленту сообщений, обновляет счётчики и т.д. Создаются асинхронно воркером `updateWorker` на основе событий.
-
-### Схема
-
-- Exchange: `chat3_updates` (topic).
-- Routing key: `user.{type}.{userId}.{updateType}`.
-  - `type` — тип пользователя, определяется следующим образом:
-    1. **Приоритетно**: извлекается из поля `type` модели `User` (если пользователь существует в БД).
-    2. **Fallback**: извлекается из префикса `userId` (до первого подчеркивания), если пользователь не найден в БД.
-    3. **По умолчанию**: `usr`, если префикса нет или пользователь не найден.
-    - Примеры:
-      - Пользователь с `userId='bot_123'` и `type='bot'` в БД → `bot`
-      - Пользователь с `userId='carl'` и `type='user'` в БД → `user`
-      - Пользователь не найден в БД, `userId='usr_123'` → `usr` (из префикса)
-      - Пользователь не найден в БД, `userId='carl'` → `usr` (по умолчанию)
-  - `updateType = dialogupdate` — изменения диалогов.
-  - `updateType = messageupdate` — сообщения, реакции, статусы.
-  - `updateType = typingupdate` — индикатор набора текста.
-- Примеры routing keys:
-  - `user.bot.bot_123.messageupdate` — обновление сообщения для бота `bot_123` (тип из модели User).
-  - `user.contact.cnt_456.dialogupdate` — обновление диалога для контакта `cnt_456` (тип из модели User).
-  - `user.usr.carl.messageupdate` — обновление сообщения для пользователя `carl` (тип `usr` по умолчанию или из модели User).
-- Очередь на стороне внешней системы обычно создаётся под конкретного пользователя или сервис.
-- Update хранится в MongoDB (`updates` коллекция) перед отправкой в RabbitMQ. Поля `published` и `publishedAt` позволяют отслеживать доставку.
-
-### Структура Update
-
-```json
-{
-  "_id": "6550dbf73a2f4c4b5e0a1df1",
-  "tenantId": "tnt_default",
-  "userId": "agent_42",
-  "dialogId": "6550d8af9b6e9a28f4f74007",
-  "entityId": "6550d9ce3a2f4c4b5e0a1d11",
-  "eventId": "6550d9ce3a2f4c4b5e0a1d22",
-  "eventType": "message.create",
-  "data": {
-    "_id": "6550d9ce3a2f4c4b5e0a1d11",
-    "senderId": "agent_42",
-    "content": "Привет! Чем помочь?",
-    "type": "internal.text",
-    "reactionCounts": {},
-    "meta": {
-      "channelType": "whatsapp",
-      "integrationId": "crm_1234"
-    },
-    "createdAt": "2025-11-08T10:10:23.512Z"
-  },
-  "published": true,
-  "publishedAt": "2025-11-08T10:10:23.640Z",
-  "createdAt": "2025-11-08T10:10:23.528Z",
-  "updatedAt": "2025-11-08T10:10:23.528Z"
-}
-```
-
-### Практики обработки Updates
-
-- Создавайте отдельные очереди для каждого пользователя: `user_${userId}_queue`.
-- Привязывайте очередь к `chat3_updates` по маске `user.{type}.${userId}.*` или `user.{type}.${userId}.messageupdate`, где `{type}` определяется следующим образом:
-  1. **Рекомендуется**: получить тип из модели `User` через REST API (`GET /api/users/:userId`) и использовать поле `type`.
-  2. **Альтернатива**: извлечь тип из префикса `userId` (до первого подчеркивания) или использовать `usr` по умолчанию.
-  - Примеры:
-    - Для пользователя `usr_123` с `type='user'` в БД: `user.user.usr_123.*` или `user.user.usr_123.messageupdate`.
-    - Для контакта `cnt_456` с `type='contact'` в БД: `user.contact.cnt_456.*` или `user.contact.cnt_456.dialogupdate`.
-    - Для бота `bot_789` с `type='bot'` в БД: `user.bot.bot_789.*` или `user.bot.bot_789.messageupdate`.
-    - Для пользователя `carl` без префикса (тип `usr` по умолчанию или из БД): `user.usr.carl.*` или `user.usr.carl.messageupdate`.
-  - Для подписки на все пользователи определённого типа используйте паттерн `user.{type}.*.*` (например, `user.bot.*.*` для всех ботов, `user.contact.*.*` для всех контактов).
-- Учитывайте, что при повторном подключении воркер выставляет `published=false` => Update может быть перепубликован.
-- Используйте `channel.ack` только после успешного обновления пользовательского интерфейса/бэкенда.
-- Для консистентности храните `eventId` и `entityId`, чтобы игнорировать дубликаты.
-
-### Пример подписчика Updates
-
-```javascript
-import amqp from 'amqplib';
-import axios from 'axios';
-
-// Функция для получения типа пользователя из модели User (рекомендуется)
-async function getUserType(tenantId, userId, apiKey) {
-  try {
-    const response = await axios.get(`http://localhost:3000/api/users/${userId}`, {
-      headers: { 'x-api-key': apiKey, 'x-tenant-id': tenantId }
-    });
-    return response.data.data.type || 'user'; // По умолчанию 'user'
-  } catch (error) {
-    // Fallback: извлекаем тип из префикса userId
-    return extractUserType(userId);
-  }
-}
-
-// Функция для извлечения типа пользователя из userId (fallback)
-function extractUserType(userId) {
-  if (!userId || typeof userId !== 'string') return 'usr';
-  const underscoreIndex = userId.indexOf('_');
-  return underscoreIndex === -1 ? 'usr' : userId.substring(0, underscoreIndex);
-}
-
-async function subscribeToUserUpdates(userId, tenantId, apiKey) {
-  const connection = await amqp.connect(process.env.RABBITMQ_URL);
-  const channel = await connection.createChannel();
-
-  const exchange = 'chat3_updates';
-  const queue = `user_${userId}_queue`;
   
-  // Получаем тип из модели User (рекомендуется) или используем fallback
-  const userType = await getUserType(tenantId, userId, apiKey);
+  // Проверяем наличие exchange
+  await channel.assertExchange(UPDATES_EXCHANGE, 'topic', { durable: true });
+  
+  return { connection, channel };
+}
+```
 
-  await channel.assertExchange(exchange, 'topic', { durable: true });
-  await channel.assertQueue(queue, { durable: true });
-  // Используем формат: user.{type}.{userId}.*
-  await channel.bindQueue(queue, exchange, `user.${userType}.${userId}.*`);
+### Формат Routing Keys для Updates
 
-  channel.consume(queue, (msg) => {
+Updates публикуются в exchange `chat3_updates` с routing key в формате:
+
+```
+update.{category}.{userType}.{userId}.{updateType}
+```
+
+Где:
+- `category` - категория обновления:
+  - `dialog` - для DialogUpdate, DialogMemberUpdate, MessageUpdate, TypingUpdate
+  - `user` - для UserUpdate, UserStatsUpdate
+- `userType` - тип пользователя из модели User (user, bot, contact и т.д.)
+- `userId` - ID пользователя-получателя
+- `updateType` - тип обновления в нижнем регистре:
+  - `dialogupdate` - DialogUpdate
+  - `dialogmemberupdate` - DialogMemberUpdate
+  - `messageupdate` - MessageUpdate
+  - `typingupdate` - TypingUpdate
+  - `userupdate` - UserUpdate
+  - `userstatsupdate` - UserStatsUpdate
+
+**Примеры routing keys:**
+- `update.dialog.user.carl.dialogupdate` - обновление диалога для пользователя carl
+- `update.dialog.user.carl.messageupdate` - обновление сообщения для пользователя carl
+- `update.user.user.carl.userstatsupdate` - обновление статистики для пользователя carl
+
+Для подписки используйте wildcards:
+- `update.*.user.carl.*` - все обновления для пользователя carl
+- `update.dialog.user.carl.*` - все обновления диалогов для пользователя carl
+
+## Подписка на обновления пользователя
+
+### Шаг 1: Получить тип пользователя
+
+Тип пользователя хранится в модели User. Используйте API:
+
+```bash
+GET /api/users/:userId
+```
+
+Или получите из Update (поле `userId` в routing key).
+
+### Шаг 2: Создать очередь для пользователя
+
+```javascript
+async function subscribeToUserUpdates(channel, userId, userType = 'user') {
+  const queueName = `user_${userId}_updates`;
+  
+  // Создаем очередь с TTL 1 час
+  await channel.assertQueue(queueName, {
+    durable: true,
+    arguments: {
+      'x-message-ttl': 3600000 // 1 час
+    }
+  });
+  
+  // Привязываем к exchange с routing key
+  // Формат: update.{category}.{userType}.{userId}.*
+  // category: dialog (DialogUpdate, DialogMemberUpdate, MessageUpdate, TypingUpdate) или user (UserUpdate, UserStatsUpdate)
+  const routingKey = `update.*.${userType}.${userId}.*`;
+  await channel.bindQueue(queueName, 'chat3_updates', routingKey);
+  
+  console.log(`✅ Subscribed to updates for user ${userId} (type: ${userType})`);
+  console.log(`   Queue: ${queueName}`);
+  console.log(`   Routing key pattern: ${routingKey}`);
+  
+  return queueName;
+}
+```
+
+### Шаг 3: Обработка обновлений
+
+```javascript
+async function consumeUserUpdates(channel, queueName, userId) {
+  await channel.consume(queueName, async (msg) => {
     if (!msg) return;
+    
     try {
       const update = JSON.parse(msg.content.toString());
-      console.log('[update]', update.eventType, update.entityId);
-      // обработка ...
+      
+      console.log(`📩 Update received for ${userId}:`, update.eventType);
+      
+      // Обработка update
+      await handleUpdate(update);
+      
+      // Подтверждаем обработку
       channel.ack(msg);
-    } catch (err) {
-      console.error('Failed to handle update', err);
-      channel.nack(msg, false, true);
+    } catch (error) {
+      console.error('Error processing update:', error);
+      // Отклоняем сообщение (можно настроить retry логику)
+      channel.nack(msg, false, false);
     }
   });
-}
-
-// Примеры использования:
-// Рекомендуется: получать тип из модели User
-subscribeToUserUpdates('bot_123', 'tnt_default', 'your_api_key').catch(console.error);  // user.bot.bot_123.*
-subscribeToUserUpdates('cnt_456', 'tnt_default', 'your_api_key').catch(console.error);  // user.contact.cnt_456.*
-subscribeToUserUpdates('carl', 'tnt_default', 'your_api_key').catch(console.error);     // user.user.carl.* или user.usr.carl.*
-
-// Альтернатива: использовать fallback (если нет доступа к REST API)
-function subscribeToUserUpdatesWithFallback(userId) {
-  const userType = extractUserType(userId);
-  // ... остальной код аналогичен
+  
+  console.log(`👂 Listening for updates on queue: ${queueName}`);
 }
 ```
 
----
+## Обработка различных типов обновлений
 
-## 🧱 Рекомендованная архитектура интеграции
+### Dialog Updates
 
-- **Backend сервис интегратора**:
-  - Хранит API ключи и конфигурацию tenant'ов.
-  - Выполняет REST вызовы (создание диалогов, сообщений, мета-тегов).
-  - Подписывается на `chat3_events` для аудита, аналитики и синхронизации с CRM.
-  - Обеспечивает идемпотентность (например, по `meta.integrationId`).
-- **Realtime / Gateway слой**:
-  - Подписывается на `chat3_updates`.
-  - Рассылает обновления в WebSocket, push-уведомления и т.д.
-  - Управляет сессиями пользователей и acknowledgements.
-- **Хранилище интегратора (опционально)**:
-  - Кэширует новые события и updates для offline; синхронизируется по `eventId`.
-  - Хранит маппинги внешних ID (CRM, тикеты).
-- **Мониторинг и алерты**:
-  - RabbitMQ: размер очередей, состояние соединений.
-  - REST: latency, error rate.
-  - MongoDB: размер коллекций `events`, `updates`, индексы.
+Создаются для событий: `dialog.create`, `dialog.update`, `dialog.delete`, `dialog.member.add`, `dialog.member.remove`, `dialog.topic.create`, `dialog.topic.update`
 
----
+**Важно:** В секции `dialog` каждого Update теперь содержится поле `stats` с информацией о непрочитанных сообщениях для получателя update:
 
-## ✅ Чек-лист запуска
+```javascript
+{
+  dialog: {
+    dialogId: "dlg_...",
+    tenantId: "tnt_default",
+    createdAt: 1234567890,
+    meta: {},
+    stats: {                    // Статистика для получателя update
+      unreadCount: 10           // Количество непрочитанных сообщений в диалоге
+    }
+  }
+}
+```
 
-1. **Создать API ключ** и обеспечить безопасное хранение.
-2. **Настроить окружение**: переменные для MongoDB, RabbitMQ, API.
-3. **Проверить соединение**: выполнить `GET /api/dialogs`.
-4. **Настроить retry-политику** для REST (экспоненциальный backoff, идемпотентные запросы).
-5. **Подключиться к `chat3_events`** и протестировать обработку основных событий.
-6. **Подключиться к `chat3_updates`** для целевых пользователей, убедиться в доставке.
-7. **Настроить мониторинг** очередей, логирование, алерты по ошибкам.
-8. **Покрыть QA-сценарии** (используйте `mongodb-memory-server` + `@onify/fake-amqplib` как в проекте).
-9. **Документировать версионность** API и событий, подготовить планы миграций.
-10. **Регулярно пересматривать ключи** (ротация, отзыв при компрометации).
+```javascript
+async function handleDialogUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, member, context } = data;
+  
+  // dialog.stats.unreadCount содержит количество непрочитанных сообщений
+  // для пользователя, которому адресован этот update
+  const unreadCount = dialog.stats?.unreadCount || 0;
+  
+  switch (eventType) {
+    case 'dialog.create':
+      // Новый диалог создан
+      await addDialogToLocalState(dialog, member);
+      await updateDialogUnreadCount(dialog.dialogId, unreadCount);
+      break;
+      
+    case 'dialog.update':
+      // Диалог обновлен
+      await updateDialogInLocalState(dialog);
+      await updateDialogUnreadCount(dialog.dialogId, unreadCount);
+      break;
+      
+    case 'dialog.delete':
+      // Диалог удален
+      await removeDialogFromLocalState(dialog.dialogId);
+      break;
+      
+    case 'dialog.member.add':
+      // Добавлен участник
+      await addMemberToDialog(dialog.dialogId, member);
+      break;
+      
+    case 'dialog.member.remove':
+      // Удален участник
+      if (member.userId === currentUserId) {
+        // Пользователь удален из диалога
+        await removeDialogFromLocalState(dialog.dialogId);
+      } else {
+        // Другой участник удален
+        await removeMemberFromDialog(dialog.dialogId, member.userId);
+      }
+      break;
+      
+    case 'dialog.topic.create':
+      // Создан новый топик в диалоге
+      // topic информация может быть в data.topic
+      await handleTopicCreated(dialog.dialogId, data.topic);
+      break;
+      
+    case 'dialog.topic.update':
+      // Топик обновлен
+      await handleTopicUpdated(dialog.dialogId, data.topic);
+      break;
+  }
+}
+```
 
----
+### Dialog Member Updates
 
-## 📚 Дополнительные материалы
+Создаются для событий: `dialog.member.update`
 
-- `docs/API.md` — полный каталог REST эндпоинтов с примерами.
-- `docs/FILTER_RULES.md` — синтаксис фильтров, поддерживаемые операторы.
-- `docs/EVENTS.md` — подробные структуры и сценарии событий.
-- `docs/UPDATES.md` — процесс генерации и публикации Updates.
-- `docs/TIMESTAMP_USAGE.md` — примечания по работе с временем и точностью.
-- `docs/FINAL_ID_FIXES.md` — особенности обработки идентификаторов и миграций.
+```javascript
+async function handleDialogMemberUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, member, context } = data;
+  
+  // Обновлено состояние участника (unreadCount, lastSeenAt и т.д.)
+  await updateMemberStateInDialog(dialog.dialogId, member);
+}
+```
 
-При необходимости команда Chat3 может предоставить демонстрационные ключи и скрипты для ускоренного старта.
+### Message Updates
+
+Создаются для событий: `message.create`, `message.update`, `message.reaction.update`, `message.status.update`
+
+**Примечание:** События `message.delete`, `message.reaction.add`, `message.reaction.remove` не создают MessageUpdate, но могут быть получены через Events.
+
+```javascript
+async function handleMessageUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, message, context } = data;
+  
+  switch (eventType) {
+    case 'message.create':
+      // Новое сообщение
+      // message.topicId - ID топика (если сообщение в топике)
+      // message.topic - объект с информацией о топике (topicId, meta)
+      await addMessageToDialog(dialog.dialogId, message);
+      break;
+      
+    case 'message.update':
+      // Сообщение обновлено
+      await updateMessageInDialog(dialog.dialogId, message);
+      break;
+      
+    case 'message.status.update':
+      // Статус сообщения изменился (прочитано, доставлено)
+      await updateMessageStatus(dialog.dialogId, message);
+      break;
+      
+    case 'message.reaction.update':
+      // Реакция изменилась
+      await updateMessageReactions(dialog.dialogId, message);
+      break;
+  }
+}
+```
+
+### Топики (Topics)
+
+Топики позволяют организовывать сообщения внутри диалога по темам. Каждое сообщение может быть привязано к топику через поле `topicId`.
+
+#### Структура топика в событиях и updates
+
+В событиях `message.create` и `message.update`, а также в MessageUpdate, сообщения могут содержать информацию о топике:
+
+```javascript
+{
+  message: {
+    messageId: "msg_...",
+    dialogId: "dlg_...",
+    senderId: "user123",
+    content: "Сообщение в топике",
+    topicId: "topic_abc123...",  // ID топика (если сообщение в топике)
+    topic: {                      // Объект с информацией о топике
+      topicId: "topic_abc123...",
+      dialogId: "dlg_...",
+      createdAt: 1234567890,
+      meta: {
+        // Мета-теги топика (например, название, цвет и т.д.)
+        name: "Важная тема",
+        color: "#FF5733"
+      }
+    }
+  }
+}
+```
+
+Если сообщение не привязано к топику, поля `topicId` и `topic` будут `null`.
+
+#### События, связанные с топиками
+
+Топики создаются и обновляются через события:
+- `dialog.topic.create` - создание нового топика в диалоге
+- `dialog.topic.update` - обновление топика (мета-теги)
+
+Эти события создают DialogUpdate для всех участников диалога.
+
+#### API для работы с топиками
+
+**Получение списка топиков диалога:**
+```bash
+GET /api/dialogs/{dialogId}/topics?page=1&limit=20
+```
+
+**Получение топиков в контексте пользователя (с количеством непрочитанных сообщений):**
+```bash
+GET /api/users/{userId}/dialogs/{dialogId}/topics?page=1&limit=20
+```
+
+Ответ включает `unreadCount` для каждого топика:
+```json
+{
+  "data": [
+    {
+      "topicId": "topic_abc123...",
+      "dialogId": "dlg_...",
+      "createdAt": 1234567890,
+      "meta": {
+        "name": "Важная тема"
+      },
+      "unreadCount": 5  // Количество непрочитанных сообщений в топике для пользователя
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 10
+  }
+}
+```
+
+**Создание топика:**
+```bash
+POST /api/dialogs/{dialogId}/topics
+Content-Type: application/json
+
+{
+  "meta": {
+    "name": "Новый топик",
+    "color": "#FF5733"
+  }
+}
+```
+
+**Создание сообщения с топиком:**
+```bash
+POST /api/dialogs/{dialogId}/messages
+Content-Type: application/json
+
+{
+  "senderId": "user123",
+  "content": "Сообщение в топике",
+  "type": "internal.text",
+  "topicId": "topic_abc123..."  // Указываем ID топика
+}
+```
+
+#### Обработка топиков в вашей системе
+
+```javascript
+async function handleMessageUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, message } = data;
+  
+  if (message.topicId) {
+    // Сообщение привязано к топику
+    const topic = message.topic;
+    
+    // Сохраняем информацию о топике
+    await saveTopicInfo(dialog.dialogId, topic);
+    
+    // Добавляем сообщение в топик
+    await addMessageToTopic(dialog.dialogId, message.topicId, message);
+  } else {
+    // Сообщение без топика (в основном потоке диалога)
+    await addMessageToDialog(dialog.dialogId, message);
+  }
+}
+
+async function handleDialogUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, topic } = data;  // topic может быть в dialog.update событиях
+  
+  if (eventType === 'dialog.topic.create') {
+    // Новый топик создан
+    await addTopicToDialog(dialog.dialogId, topic);
+  } else if (eventType === 'dialog.topic.update') {
+    // Топик обновлен
+    await updateTopicInDialog(dialog.dialogId, topic);
+  }
+}
+```
+
+#### Статистика по топикам
+
+В секции `dialog` каждого Update теперь содержится поле `stats` с информацией о непрочитанных сообщениях:
+
+```javascript
+{
+  dialog: {
+    dialogId: "dlg_...",
+    tenantId: "tnt_default",
+    createdAt: 1234567890,
+    meta: {},
+    stats: {                    // Статистика для получателя update
+      unreadCount: 10           // Общее количество непрочитанных сообщений в диалоге
+    }
+  }
+}
+```
+
+Для получения детальной статистики по топикам используйте endpoint `/api/users/{userId}/dialogs/{dialogId}/topics`, который возвращает `unreadCount` для каждого топика.
+
+### Typing Updates
+
+Создаются для событий: `dialog.typing`
+
+**Важно:** В секции `dialog` также содержится поле `stats` с информацией о непрочитанных сообщениях для получателя update.
+
+```javascript
+async function handleTypingUpdate(update) {
+  const { eventType, data } = update;
+  const { dialog, typing, context } = data;
+  
+  // Пользователь печатает в диалоге
+  await showTypingIndicator(dialog.dialogId, typing.userId, typing.expiresInMs);
+  
+  // dialog.stats.unreadCount содержит актуальное количество непрочитанных сообщений
+  const unreadCount = dialog.stats?.unreadCount || 0;
+  await updateDialogUnreadCount(dialog.dialogId, unreadCount);
+}
+```
+
+### User Updates
+
+Создаются для событий: `user.add`, `user.update`, `user.remove`
+
+```javascript
+async function handleUserUpdate(update) {
+  const { eventType, data } = update;
+  const { user, context } = data;
+  
+  switch (eventType) {
+    case 'user.add':
+      await addUserToLocalState(user);
+      break;
+      
+    case 'user.update':
+      await updateUserInLocalState(user);
+      break;
+      
+    case 'user.remove':
+      await removeUserFromLocalState(user.userId);
+      break;
+  }
+}
+```
+
+### User Stats Updates
+
+Создаются автоматически для событий: `user.stats.update`
+
+**Примечание:** Этот тип update создается автоматически при изменении статистики пользователя (количество диалогов, непрочитанных диалогов).
+
+```javascript
+async function handleUserStatsUpdate(update) {
+  const { eventType, data } = update;
+  const { user, context } = data;
+  
+  // Обновлена статистика пользователя
+  // user.stats.dialogCount - количество диалогов
+  // user.stats.unreadDialogsCount - количество непрочитанных диалогов
+  await updateUserStats(user.userId, user.stats);
+}
+```
+
+## Подписка на события (опционально)
+
+Если нужны события напрямую (без обработки через Updates):
+
+**Важно:** Некоторые события не создают Updates, но доступны через Events:
+- `message.delete` - удаление сообщения
+- `message.reaction.add` - добавление реакции
+- `message.reaction.remove` - удаление реакции
+
+Для получения этих событий подпишитесь на exchange `chat3_events`:
+
+```javascript
+async function subscribeToEvents(channel) {
+  const queueName = 'my_events_queue';
+  
+  await channel.assertQueue(queueName, { durable: true });
+  
+  // Подписка на все события диалогов
+  await channel.bindQueue(queueName, 'chat3_events', 'dialog.*');
+  
+  // Подписка на все события сообщений
+  await channel.bindQueue(queueName, 'chat3_events', 'message.*');
+  
+  await channel.consume(queueName, (msg) => {
+    if (msg) {
+      const event = JSON.parse(msg.content.toString());
+      console.log('Event received:', event.eventType);
+      handleEvent(event);
+      channel.ack(msg);
+    }
+  });
+}
+```
+
+**Формат routing key для событий:** `{entityType}.{action}.{tenantId}`
+
+Примеры:
+- `dialog.create.tnt_default` - создание диалога
+- `message.delete.tnt_default` - удаление сообщения
+- `dialog.member.add.tnt_default` - добавление участника
+
+Для подписки на все события используйте wildcard: `#` (все события) или `*.create.*` (все события создания).
+
+## Полный пример интеграции
+
+```javascript
+import amqp from 'amqplib';
+
+const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://rmuser:rmpassword@localhost:5672/';
+const UPDATES_EXCHANGE = 'chat3_updates';
+
+class Chat3Integration {
+  constructor(userId, userType = 'user') {
+    this.userId = userId;
+    this.userType = userType;
+    this.connection = null;
+    this.channel = null;
+  }
+  
+  async connect() {
+    this.connection = await amqp.connect(RABBITMQ_URL);
+    this.channel = await this.connection.createChannel();
+    
+    await this.channel.assertExchange(UPDATES_EXCHANGE, 'topic', { durable: true });
+    
+    console.log('✅ Connected to Chat3 RabbitMQ');
+  }
+  
+  async subscribe() {
+    const queueName = `user_${this.userId}_updates`;
+    
+    await this.channel.assertQueue(queueName, {
+      durable: true,
+      arguments: { 'x-message-ttl': 3600000 }
+    });
+    
+    // Подписываемся на все updates для пользователя
+    // Формат routing key: update.{category}.{userType}.{userId}.{updateType}
+    const routingKey = `update.*.${this.userType}.${this.userId}.*`;
+    await this.channel.bindQueue(queueName, UPDATES_EXCHANGE, routingKey);
+    
+    await this.channel.consume(queueName, async (msg) => {
+      if (!msg) return;
+      
+      try {
+        const update = JSON.parse(msg.content.toString());
+        await this.handleUpdate(update);
+        this.channel.ack(msg);
+      } catch (error) {
+        console.error('Error processing update:', error);
+        this.channel.nack(msg, false, false);
+      }
+    });
+    
+    console.log(`👂 Listening for updates: ${routingKey}`);
+  }
+  
+  async handleUpdate(update) {
+    const { eventType, data } = update;
+    
+    console.log(`📩 ${eventType} for user ${this.userId}`);
+    
+    // Ваша логика обработки
+    switch (eventType) {
+      // Dialog Updates
+      case 'dialog.create':
+      case 'dialog.update':
+      case 'dialog.delete':
+      case 'dialog.member.add':
+      case 'dialog.member.remove':
+        await this.handleDialogUpdate(update);
+        break;
+        
+      // Dialog Member Updates
+      case 'dialog.member.update':
+        await this.handleDialogMemberUpdate(update);
+        break;
+        
+      // Message Updates
+      case 'message.create':
+      case 'message.update':
+      case 'message.status.update':
+      case 'message.reaction.update':
+        await this.handleMessageUpdate(update);
+        break;
+        
+      // Typing Updates
+      case 'dialog.typing':
+        await this.handleTypingUpdate(update);
+        break;
+        
+      // User Updates
+      case 'user.add':
+      case 'user.update':
+      case 'user.remove':
+        await this.handleUserUpdate(update);
+        break;
+        
+      // User Stats Updates
+      case 'user.stats.update':
+        await this.handleUserStatsUpdate(update);
+        break;
+    }
+  }
+  
+  async handleDialogUpdate(update) {
+    // Ваша реализация
+    console.log('Dialog update:', update.data.dialog);
+  }
+  
+  async handleDialogMemberUpdate(update) {
+    // Ваша реализация
+    console.log('Dialog member update:', update.data.member);
+  }
+  
+  async handleMessageUpdate(update) {
+    // Ваша реализация
+    const { dialog, message } = update.data;
+    
+    // dialog.stats.unreadCount содержит актуальное количество непрочитанных сообщений
+    const unreadCount = dialog.stats?.unreadCount || 0;
+    
+    // message.topicId и message.topic содержат информацию о топике (если есть)
+    if (message.topicId) {
+      console.log('Message in topic:', message.topicId, message.topic);
+    }
+    
+    console.log('Message update:', message);
+    console.log('Dialog unread count:', unreadCount);
+  }
+  
+  async handleTypingUpdate(update) {
+    // Ваша реализация
+    console.log('Typing update:', update.data.typing);
+  }
+  
+  async handleUserUpdate(update) {
+    // Ваша реализация
+    console.log('User update:', update.data.user);
+  }
+  
+  async handleUserStatsUpdate(update) {
+    // Ваша реализация
+    console.log('User stats update:', update.data.user.stats);
+  }
+  
+  async disconnect() {
+    if (this.channel) await this.channel.close();
+    if (this.connection) await this.connection.close();
+    console.log('✅ Disconnected from Chat3');
+  }
+}
+
+// Использование
+async function main() {
+  const integration = new Chat3Integration('carl', 'user');
+  
+  await integration.connect();
+  await integration.subscribe();
+  
+  // Обработка сигналов для graceful shutdown
+  process.on('SIGINT', async () => {
+    await integration.disconnect();
+    process.exit(0);
+  });
+}
+
+main().catch(console.error);
+```
+
+## Обработка ошибок и переподключение
+
+```javascript
+class Chat3Integration {
+  // ... предыдущий код ...
+  
+  async connect() {
+    try {
+      this.connection = await amqp.connect(RABBITMQ_URL);
+      this.channel = await this.connection.createChannel();
+      
+      // Обработка ошибок соединения
+      this.connection.on('error', (err) => {
+        console.error('Connection error:', err);
+        this.reconnect();
+      });
+      
+      this.connection.on('close', () => {
+        console.warn('Connection closed, reconnecting...');
+        this.reconnect();
+      });
+      
+      await this.channel.assertExchange(UPDATES_EXCHANGE, 'topic', { durable: true });
+      console.log('✅ Connected to Chat3 RabbitMQ');
+    } catch (error) {
+      console.error('Failed to connect:', error);
+      this.reconnect();
+    }
+  }
+  
+  async reconnect() {
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Ждем 5 секунд
+    try {
+      await this.connect();
+      await this.subscribe();
+    } catch (error) {
+      console.error('Reconnection failed:', error);
+      this.reconnect(); // Повторная попытка
+    }
+  }
+}
+```
+
+## Тестирование интеграции
+
+### 1. Создать тестового пользователя
+
+```bash
+curl -X POST http://localhost:3000/api/users \
+  -H "X-API-Key: your-key" \
+  -H "X-Tenant-ID: tnt_default" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "test_user",
+    "name": "Test User",
+    "type": "user"
+  }'
+```
+
+### 2. Создать диалог
+
+```bash
+curl -X POST http://localhost:3000/api/dialogs \
+  -H "X-API-Key: your-key" \
+  -H "X-Tenant-ID: tnt_default" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Dialog",
+    "createdBy": "test_user",
+    "members": [
+      {"userId": "test_user", "type": "user"}
+    ]
+  }'
+```
+
+### 3. Добавить сообщение
+
+```bash
+curl -X POST http://localhost:3000/api/dialogs/{dialogId}/messages \
+  -H "X-API-Key: your-key" \
+  -H "X-Tenant-ID: tnt_default" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "senderId": "test_user",
+    "content": "Hello!",
+    "type": "internal.text"
+  }'
+```
+
+**Примечание:** Замените `{dialogId}` на реальный ID диалога, полученный из ответа на шаге 2.
+
+### 4. Проверить получение Updates
+
+Ваш consumer должен получить Update для `test_user` с типом `message.create`.
+
+## Best Practices
+
+1. **Обработка дубликатов**
+   - Используйте `eventId` из Update для дедупликации
+   - Храните последний обработанный `eventId`
+
+2. **Обработка порядка**
+   - Updates могут приходить не по порядку
+   - Используйте `createdAt` для сортировки
+   - Применяйте updates в правильном порядке
+
+3. **Обработка ошибок**
+   - Всегда подтверждайте сообщения (`ack`) после успешной обработки
+   - Используйте `nack` с `requeue: false` для критических ошибок
+   - Логируйте все ошибки
+
+4. **Производительность**
+   - Обрабатывайте updates асинхронно
+   - Используйте батчинг для массовых операций
+   - Кэшируйте часто используемые данные
+
+5. **Мониторинг**
+   - Отслеживайте количество необработанных сообщений
+   - Мониторьте задержки обработки
+   - Логируйте важные события
+
+## Примеры routing keys
+
+Формат routing key: `update.{category}.{userType}.{userId}.{updateType}`
+
+Где:
+- `category` - категория обновления: `dialog` (DialogUpdate, DialogMemberUpdate, MessageUpdate, TypingUpdate) или `user` (UserUpdate, UserStatsUpdate)
+- `userType` - тип пользователя из модели User (user, bot, contact и т.д.)
+- `userId` - ID пользователя
+- `updateType` - тип обновления в нижнем регистре (dialogupdate, dialogmemberupdate, messageupdate, typingupdate, userupdate, userstatsupdate)
+
+**Примеры routing keys:**
+
+```
+# Все обновления для пользователя carl типа user
+update.*.user.carl.*
+
+# Все обновления диалогов для пользователя carl
+update.dialog.user.carl.*
+
+# Все обновления сообщений для пользователя carl
+update.dialog.user.carl.messageupdate
+
+# Все обновления для всех пользователей типа bot
+update.*.bot.*.*
+
+# Все обновления диалогов для всех пользователей типа user
+update.dialog.user.*.dialogupdate
+
+# Все обновления статистики пользователей
+update.user.*.*.userstatsupdate
+```
+
+**Примеры для подписки (wildcards):**
+
+```javascript
+// Все обновления для пользователя carl
+await channel.bindQueue(queueName, 'chat3_updates', 'update.*.user.carl.*');
+
+// Только обновления диалогов для пользователя carl
+await channel.bindQueue(queueName, 'chat3_updates', 'update.dialog.user.carl.*');
+
+// Все обновления для всех пользователей типа bot
+await channel.bindQueue(queueName, 'chat3_updates', 'update.*.bot.*.*');
+
+// Все обновления диалогов для всех пользователей типа user
+await channel.bindQueue(queueName, 'chat3_updates', 'update.dialog.user.*.*');
+```
+
+## Поддержка
+
+Для вопросов и проблем обращайтесь к документации:
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Архитектура системы
+- [API.md](API.md) - API документация
+- [EVENTS.md](EVENTS.md) - Система событий
+- [UPDATES.md](UPDATES.md) - Система обновлений
 

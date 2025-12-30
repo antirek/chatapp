@@ -418,6 +418,35 @@ class Chat3Client {
     );
     return response.data;
   }
+
+  // ==================== TOPICS ====================
+
+  /**
+   * Get topics for a dialog
+   * GET /api/dialogs/{dialogId}/topics
+   */
+  async getDialogTopics(dialogId, params = {}) {
+    const response = await this.client.get(`/dialogs/${dialogId}/topics`, { params });
+    return response.data;
+  }
+
+  /**
+   * Get topics for a dialog in user context (with unreadCount)
+   * GET /api/users/{userId}/dialogs/{dialogId}/topics
+   */
+  async getUserDialogTopics(userId, dialogId, params = {}) {
+    const response = await this.client.get(`/users/${userId}/dialogs/${dialogId}/topics`, { params });
+    return response.data;
+  }
+
+  /**
+   * Create a new topic in a dialog
+   * POST /api/dialogs/{dialogId}/topics
+   */
+  async createDialogTopic(dialogId, data) {
+    const response = await this.client.post(`/dialogs/${dialogId}/topics`, data);
+    return response.data;
+  }
 }
 
 export default new Chat3Client();

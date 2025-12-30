@@ -16,9 +16,10 @@ export async function getDialogMessages(req, res) {
         limit,
       });
 
-      // Check if statusMatrix exists in context or top-level statuses (for fallback check)
+      // Check if statusMatrix exists in context, statusMessageMatrix, or top-level statuses (for fallback check)
       const hasStatuses = result.data && result.data.length > 0 && (
         result.data[0].context?.statusMatrix || 
+        result.data[0].statusMessageMatrix ||
         result.data[0].statuses
       );
       
@@ -42,13 +43,15 @@ export async function getDialogMessages(req, res) {
     console.log(`📊 [getDialogMessages] Processing ${Array.isArray(result.data) ? result.data.length : 0} messages`);
     try {
       processedData = Array.isArray(result.data) ? result.data.map(message => {
-        // Extract statuses from context.statusMatrix or top-level message.statuses
+        // Extract statuses from context.statusMatrix, statusMessageMatrix, or top-level message.statuses
+        // Priority: context.statusMatrix > statusMessageMatrix > statuses
         const contextStatusMatrix = message.context?.statusMatrix;
+        const statusMessageMatrix = message.statusMessageMatrix;
         const topLevelStatuses = message.statuses;
-        const statusesToUse = contextStatusMatrix || topLevelStatuses;
+        const statusesToUse = contextStatusMatrix || statusMessageMatrix || topLevelStatuses;
         
-        // Remove statuses from top-level (we'll use statusMatrix in context)
-        const { statuses: _, ...restMessage } = message;
+        // Remove statuses and statusMessageMatrix from top-level (we'll use statusMatrix in context)
+        const { statuses: _, statusMessageMatrix: __, ...restMessage } = message;
         const processedMessage = { ...restMessage };
         
         if (processedMessage.context) {
@@ -91,7 +94,7 @@ export async function getDialogMessages(req, res) {
 export async function sendDialogMessage(req, res) {
   try {
     const { dialogId } = req.params;
-    const { content, type = 'text', meta = {}, quotedMessageId } = req.body;
+    const { content, type = 'text', meta = {}, quotedMessageId, topicId } = req.body;
     const mappedType = mapOutgoingMessageType(type);
     const trimmedContent = typeof content === 'string' ? content.trim() : '';
 
@@ -135,6 +138,10 @@ export async function sendDialogMessage(req, res) {
 
     if (quotedMessageId) {
       messagePayload.quotedMessageId = quotedMessageId;
+    }
+
+    if (topicId) {
+      messagePayload.topicId = topicId;
     }
 
     // Get channelId for business contact dialogs

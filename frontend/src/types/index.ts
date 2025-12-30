@@ -107,6 +107,8 @@ export interface Message {
   }>
   normalizedType?: string
   quotedMessage?: QuotedMessage
+  topicId?: string | null
+  topic?: Topic | null
 }
 
 export interface SendMessageData {
@@ -114,6 +116,22 @@ export interface SendMessageData {
   type?: string
   meta?: Record<string, any>
   quotedMessageId?: string
+  topicId?: string | null
+}
+
+// Topic types
+export interface Topic {
+  topicId: string
+  dialogId: string
+  createdAt: string | number
+  updatedAt?: string | number
+  meta?: {
+    name?: string
+    color?: string
+    description?: string
+    [key: string]: any
+  }
+  unreadCount?: number // Only in user context endpoints
 }
 
 // Chat3 Update types

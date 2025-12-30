@@ -37,6 +37,7 @@ class RabbitMQConsumer {
       this.isConnected = true;
       console.log('✅ RabbitMQ Consumer connected successfully');
       console.log(`   Exchange: ${config.rabbitmq.updatesExchange} (topic)`);
+      console.log(`   🔍 Config check: updatesExchange = ${config.rabbitmq.updatesExchange}, env var = ${process.env.RABBITMQ_UPDATES_EXCHANGE || 'not set'}`);
 
       // Create global queue for message sender worker (only if running as standalone worker)
       // Check if we're running as a worker process
@@ -102,8 +103,9 @@ class RabbitMQConsumer {
         console.log(`⚠️  User ${userId} not found in Chat3, using type from prefix: ${userType}`);
       }
       
-      // New format: user.{type}.{userId}.*
-      const routingKey = `user.${userType}.${userId}.*`;
+      // Chat3 format: update.{category}.{userType}.{userId}.{updateType}
+      // Use wildcard for category: update.*.{userType}.{userId}.*
+      const routingKey = `update.*.${userType}.${userId}.*`;
 
       // Создать очередь (сохраняется 1 час для краткосрочных отключений)
       await this.channel.assertQueue(queueName, {
@@ -117,17 +119,21 @@ class RabbitMQConsumer {
       });
 
       // Привязать к exchange
+      console.log(`🔗 Binding queue ${queueName} to exchange ${config.rabbitmq.updatesExchange} with routing key: ${routingKey}`);
       await this.channel.bindQueue(
         queueName,
         config.rabbitmq.updatesExchange,
         routingKey
       );
+      console.log(`✅ Queue ${queueName} bound successfully`);
 
       console.log(`📬 Created queue for user: ${userId}`);
       console.log(`   Queue: ${queueName}`);
       console.log(`   Routing: ${routingKey}`);
+      console.log(`   Exchange: ${config.rabbitmq.updatesExchange}`);
 
       // Начать получать updates
+      console.log(`👂 Starting to consume from queue: ${queueName} with routing key: ${routingKey}`);
       const { consumerTag } = await this.channel.consume(
         queueName,
         async (msg) => {
@@ -135,6 +141,7 @@ class RabbitMQConsumer {
             try {
               const update = JSON.parse(msg.content.toString());
               console.log(`📨 Received update for ${userId}:`, update.eventType);
+              console.log(`   Full update:`, JSON.stringify(update, null, 2));
 
               // Вызвать callback
               await onUpdate(update);
@@ -143,13 +150,18 @@ class RabbitMQConsumer {
               this.channel.ack(msg);
             } catch (error) {
               console.error(`❌ Error processing update for ${userId}:`, error.message);
+              console.error(`   Update content:`, msg.content.toString());
               // Отклонить сообщение (не будет повторно отправлено)
               this.channel.nack(msg, false, false);
             }
+          } else {
+            console.log(`⚠️  Received null message for ${userId} - consumer cancelled?`);
           }
         },
         { noAck: false } // Manual acknowledgment
       );
+      
+      console.log(`✅ Consumer started for ${userId}, tag: ${consumerTag}`);
 
       // Сохранить информацию об очереди
       this.userQueues.set(userId, { queueName, consumerTag });

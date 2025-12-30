@@ -30,7 +30,11 @@ class AuthService {
         throw new Error('Name is required for new users');
       }
 
+      // Default accountId for new users (can be configured via env)
+      const defaultAccountId = process.env.DEFAULT_ACCOUNT_ID || 'test_account_1';
+
       user = new User({
+        accountId: defaultAccountId,
         phone,
         name,
         verificationCode: { code, expiresAt },

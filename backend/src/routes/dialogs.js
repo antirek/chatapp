@@ -18,6 +18,11 @@ import {
   unpinMessage,
   getPinnedMessage,
 } from '../controllers/dialogsController.js';
+import {
+  getDialogTopics,
+  getUserDialogTopics,
+  createDialogTopic,
+} from '../controllers/topicsController.js';
 
 const router = express.Router();
 
@@ -449,5 +454,113 @@ router.delete('/:dialogId/pin', unpinMessage);
  *         description: User is not a member of the dialog
  */
 router.get('/:dialogId/pinned', getPinnedMessage);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/topics:
+ *   get:
+ *     tags: [Dialogs]
+ *     summary: Get topics for a dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       '200':
+ *         description: List of topics
+ *       '403':
+ *         description: User is not a member of the dialog
+ */
+router.get('/:dialogId/topics', getDialogTopics);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/topics/user:
+ *   get:
+ *     tags: [Dialogs]
+ *     summary: Get topics for a dialog in user context (with unreadCount)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       '200':
+ *         description: List of topics with unreadCount
+ *       '403':
+ *         description: User is not a member of the dialog
+ */
+router.get('/:dialogId/topics/user', getUserDialogTopics);
+
+/**
+ * @openapi
+ * /api/dialogs/{dialogId}/topics:
+ *   post:
+ *     tags: [Dialogs]
+ *     summary: Create a new topic in a dialog
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dialogId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - meta
+ *             properties:
+ *               meta:
+ *                 type: object
+ *                 required:
+ *                   - name
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                   color:
+ *                     type: string
+ *                   description:
+ *                     type: string
+ *     responses:
+ *       '200':
+ *         description: Topic created successfully
+ *       '400':
+ *         description: Invalid request (missing meta.name)
+ *       '403':
+ *         description: User is not a member of the dialog
+ */
+router.post('/:dialogId/topics', createDialogTopic);
 
 export default router;

@@ -6,7 +6,8 @@ import type {
   Message,
   SendMessageData,
   PaginatedResponse,
-  ApiResponse
+  ApiResponse,
+  Topic
 } from '@/types'
 
 class ApiService {
@@ -197,6 +198,36 @@ class ApiService {
     return data
   }
 
+  // ==================== TOPICS ====================
+
+  async getTopics(dialogId: string, params?: {
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<Topic>> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/topics`, { params })
+    return data
+  }
+
+  async getUserTopics(dialogId: string, params?: {
+    page?: number
+    limit?: number
+  }): Promise<PaginatedResponse<Topic>> {
+    const { data } = await this.api.get(`/dialogs/${dialogId}/topics/user`, { params })
+    return data
+  }
+
+  async createTopic(dialogId: string, topicData: {
+    meta?: {
+      name?: string
+      color?: string
+      description?: string
+      [key: string]: any
+    }
+  }): Promise<ApiResponse<Topic>> {
+    const { data } = await this.api.post(`/dialogs/${dialogId}/topics`, topicData)
+    return data
+  }
+
   // ==================== MESSAGES ====================
 
   async getMessages(dialogId: string, params?: {
@@ -208,6 +239,7 @@ class ApiService {
   }
 
   async sendMessage(dialogId: string, messageData: SendMessageData): Promise<ApiResponse<Message>> {
+    // topicId is already included in SendMessageData type
     const { data } = await this.api.post(`/dialog/${dialogId}/messages`, messageData)
     return data
   }

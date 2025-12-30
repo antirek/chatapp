@@ -21,7 +21,7 @@ const config = {
   
   chat3: {
     apiUrl: process.env.CHAT3_API_URL || 'http://localhost:3000/api',
-    apiKey: process.env.CHAT3_API_KEY || 'chat3_ed2d3562bff27144ae8f88bcd618ba387418ce21af6c64513a60d767c039a8e8',
+    apiKey: process.env.CHAT3_API_KEY || 'chat3_f0f71a596d0b47977edb7a5064ad2a1fd0a2a920c7c10cff0ff964c3f7ff2c76',
   },
   
   sms: {
@@ -30,7 +30,7 @@ const config = {
   
   rabbitmq: {
     url: process.env.RABBITMQ_URL || 'amqp://rmuser:rmpassword@localhost:5672/',
-    updatesExchange: process.env.RABBITMQ_UPDATES_EXCHANGE || 'chat3_updates',
+    updatesExchange: process.env.RABBITMQ_UPDATES_EXCHANGE || 'mms3_updates',
   },
 };
 

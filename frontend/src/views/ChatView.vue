@@ -238,6 +238,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useMessagesStore } from '@/stores/messages'
+import { useTopicsStore } from '@/stores/topics'
 import websocket from '@/services/websocket'
 import api from '@/services/api'
 import DialogList from '@/components/DialogList.vue'
@@ -257,6 +258,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const dialogsStore = useDialogsStore()
 const messagesStore = useMessagesStore()
+const topicsStore = useTopicsStore()
 
 const isCreateDialogOpen = ref(false)
 const isCreateGroupOpen = ref(false)
@@ -429,13 +431,29 @@ function resolveEventType(update: any): string | undefined {
 }
 
 function deriveDialogId(update: any, envelope: any): string | undefined {
-  return (
+  const dialogId = (
     update?.dialogId ||
     envelope?.context?.dialogId ||
     envelope?.dialog?.dialogId ||
     envelope?.message?.dialogId ||
     envelope?.typing?.dialogId
   )
+  
+  // If dialogId is an object, extract the ID
+  const resolvedDialogId = typeof dialogId === 'object' 
+    ? (dialogId._id || dialogId.id || dialogId.dialogId)
+    : dialogId
+    
+  console.log('🔍 deriveDialogId:', {
+    updateDialogId: update?.dialogId,
+    envelopeContextDialogId: envelope?.context?.dialogId,
+    envelopeDialogDialogId: envelope?.dialog?.dialogId,
+    envelopeMessageDialogId: envelope?.message?.dialogId,
+    rawDialogId: dialogId,
+    resolvedDialogId
+  })
+  
+  return resolvedDialogId
 }
 
 async function handleChat3Update(update: any) {
@@ -443,7 +461,13 @@ async function handleChat3Update(update: any) {
   const envelope = update?.data || {}
   const dialogId = deriveDialogId(update, envelope)
 
-  console.log('🔄 Processing Chat3 Update:', eventType, envelope)
+  console.log('🔄 Processing Chat3 Update:', {
+    eventType,
+    dialogId,
+    update,
+    envelope,
+    message: envelope.message
+  })
   
   if (!eventType) {
     console.warn('⚠️  Cannot resolve event type for update:', update)
@@ -453,6 +477,11 @@ async function handleChat3Update(update: any) {
   switch (eventType) {
     case 'message.create':
       if (envelope.message) {
+        console.log('📨 message.create - calling handleNewMessage with:', {
+          message: envelope.message,
+          envelope,
+          dialogId
+        })
         await handleNewMessage(envelope.message, envelope, dialogId)
       } else {
         console.warn('⚠️  message.create received without message payload:', update)
@@ -473,6 +502,11 @@ async function handleChat3Update(update: any) {
     case 'dialog.member.remove':
     case 'dialog.member.update':
       handleDialogUpdate(update)
+      break
+    
+    case 'dialog.topic.create':
+    case 'dialog.topic.update':
+      handleTopicUpdate(eventType, envelope, dialogId)
       break
 
     case 'dialog.typing': {
@@ -503,12 +537,16 @@ async function handleNewMessage(message: any, envelope?: any, fallbackDialogId?:
   const isFromOtherUser = message.senderId !== authStore.user?.userId
   
   console.log('📩 handleNewMessage:', {
+    message,
     messageDialogId,
+    fallbackDialogId,
+    resolvedDialogId,
     currentDialogId,
     senderId: message.senderId,
     currentUserId: authStore.user?.userId,
     isFromOtherUser,
-    isCurrentDialog: messageDialogId === currentDialogId
+    isCurrentDialog: resolvedDialogId === currentDialogId,
+    willAddToStore: resolvedDialogId && resolvedDialogId === currentDialogId
   })
   
   // Play notification sound for messages from other users
@@ -521,14 +559,22 @@ async function handleNewMessage(message: any, envelope?: any, fallbackDialogId?:
   
   // Add to messages store if in current dialog
   if (resolvedDialogId && resolvedDialogId === currentDialogId) {
+    console.log('✅ Adding message to store:', message.messageId || message._id)
     messagesStore.addMessage(message)
-  } else if (isFromOtherUser && resolvedDialogId) {
-    const unreadFromUpdate = envelope?.member?.state?.unreadCount
-    if (typeof unreadFromUpdate === 'number') {
-      dialogsStore.updateDialogUnreadCount(resolvedDialogId, unreadFromUpdate)
-    } else {
-      console.log('🔢 Incrementing unread count for dialog:', resolvedDialogId)
-      await dialogsStore.incrementUnreadCount(resolvedDialogId)
+  } else {
+    console.log('⚠️ NOT adding message to store:', {
+      reason: !resolvedDialogId ? 'no dialogId' : resolvedDialogId !== currentDialogId ? 'different dialog' : 'unknown',
+      resolvedDialogId,
+      currentDialogId
+    })
+    if (isFromOtherUser && resolvedDialogId) {
+      const unreadFromUpdate = envelope?.member?.state?.unreadCount
+      if (typeof unreadFromUpdate === 'number') {
+        dialogsStore.updateDialogUnreadCount(resolvedDialogId, unreadFromUpdate)
+      } else {
+        console.log('🔢 Incrementing unread count for dialog:', resolvedDialogId)
+        await dialogsStore.incrementUnreadCount(resolvedDialogId)
+      }
     }
   }
 
@@ -603,6 +649,31 @@ function handleMessageUpdate(eventType: string, envelope: any) {
 function handleDialogUpdate(update: any) {
   // Refresh dialogs on dialog updates
   dialogsStore.fetchDialogs()
+}
+
+function handleTopicUpdate(eventType: string, envelope: any, dialogId?: string) {
+  console.log('📌 Topic update received:', eventType, envelope)
+  
+  if (!dialogId) {
+    console.warn('⚠️ Topic update without dialogId')
+    return
+  }
+  
+  const topic = envelope?.topic
+  if (!topic) {
+    console.warn('⚠️ Topic update without topic data')
+    return
+  }
+  
+  // Update topics store
+  topicsStore.addOrUpdateTopic(topic)
+  
+  // If this is the current dialog, refresh topics list
+  if (dialogsStore.currentDialog?.dialogId === dialogId) {
+    topicsStore.fetchUserTopics(dialogId).catch(err => {
+      console.error('Failed to refresh topics after update:', err)
+    })
+  }
 }
 
 async function selectDialog(dialogId: string) {

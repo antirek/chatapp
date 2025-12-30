@@ -102,6 +102,13 @@
       </button>
     </div>
 
+    <!-- Topics List (only for group chats) -->
+    <TopicsList
+      v-if="isGroupChat"
+      :dialog="dialog"
+      @create-topic="showCreateTopicModal = true"
+    />
+
     <!-- Messages -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50" @scroll="handleScroll">
       <!-- Loading More (at top) -->
@@ -116,7 +123,7 @@
 
       <!-- Messages List -->
       <div
-        v-for="message in messagesStore.sortedMessages"
+        v-for="message in filteredMessages"
         :key="`${message.messageId || message._id}-${JSON.stringify(message.statuses || [])}`"
         :data-message-id="message.messageId || message._id"
       >
@@ -148,6 +155,22 @@
           </div>
 
           <div class="flex flex-col relative" :class="shouldAlignRight(message) ? 'items-end' : 'items-start'">
+            <!-- Topic Badge (only for group chats) -->
+            <div
+              v-if="isGroupChat && message.topicId && message.topic"
+              class="text-xs mb-1 px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+              :style="{
+                backgroundColor: message.topic.meta?.color ? `${message.topic.meta.color}20` : '#E5E7EB',
+                color: message.topic.meta?.color || '#6B7280'
+              }"
+            >
+              <div
+                class="w-2 h-2 rounded-full"
+                :style="{ backgroundColor: message.topic.meta?.color || '#9CA3AF' }"
+              ></div>
+              {{ message.topic.meta?.name || 'Без названия' }}
+            </div>
+            
             <!-- Sender Name -->
             <div class="text-xs mb-1 px-1"
               :class="shouldAlignRight(message) ? 'text-primary-600 font-medium' : 'text-gray-500 font-medium'"
@@ -313,12 +336,40 @@
       </div>
     </div>
 
+    <!-- Topic Selector (only for group chats) -->
+    <div v-if="isGroupChat && topicsStore.topics.length > 0" class="px-4 py-2 bg-gray-50 border-t border-gray-200">
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-600 font-medium">Топик:</label>
+        <select
+          v-model="selectedTopicIdForMessage"
+          class="flex-1 text-sm px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+        >
+          <option :value="null">Все сообщения</option>
+          <option
+            v-for="topic in topicsStore.topics"
+            :key="topic.topicId"
+            :value="topic.topicId"
+          >
+            {{ topic.meta?.name || 'Без названия' }}
+          </option>
+        </select>
+      </div>
+    </div>
+
     <!-- Message Input -->
     <MessageInput
       :quoted-message="quotedMessage"
       @send="handleSendMessage"
       @send-image="handleSendImage"
       @cancel-quote="handleCancelQuote"
+    />
+
+    <!-- Create Topic Modal -->
+    <CreateTopicModal
+      :is-open="showCreateTopicModal"
+      :dialog-id="dialog.dialogId"
+      @close="showCreateTopicModal = false"
+      @created="handleTopicCreated"
     />
 
     <!-- Dialog Info Modal (unified for all dialog types) -->
@@ -347,11 +398,14 @@ import { ref, computed, watch, watchEffect, nextTick, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
 import { useDialogsStore } from '@/stores/dialogs'
+import { useTopicsStore } from '@/stores/topics'
 import { formatTypingUsers } from '@/utils/typing'
 import api from '@/services/api'
 import MessageInput from './MessageInput.vue'
 import DialogInfoModal from './DialogInfoModal.vue'
 import AddGroupMembersModal from './AddGroupMembersModal.vue'
+import TopicsList from './TopicsList.vue'
+import CreateTopicModal from './CreateTopicModal.vue'
 import Avatar from './Avatar.vue'
 import type { Dialog, Message, SendMessageData } from '@/types'
 import { normalizeMessageType } from '@/utils/messageType'
@@ -385,11 +439,14 @@ const LEGACY_P2P_AVATAR_PREFIX = 'p2pDialogAvatarFor'
 const authStore = useAuthStore()
 const messagesStore = useMessagesStore()
 const dialogsStore = useDialogsStore()
+const topicsStore = useTopicsStore()
 const messagesContainer = ref<HTMLElement>()
 
 const isDialogInfoOpen = ref(false)
 const isAddMembersOpen = ref(false)
 const isMarkingRead = ref(false)
+const showCreateTopicModal = ref(false)
+const selectedTopicIdForMessage = ref<string | null>(null)
 const otherUser = ref<any>(null)
 const userAvatars = ref<Record<string, string | null>>({})
 const userNamesCache = ref<Record<string, string>>({})
@@ -489,6 +546,20 @@ const dialogDisplayName = computed(() => {
 
 const typingUsers = computed(() => messagesStore.getTypingUsers(props.dialog.dialogId))
 
+// Filter messages by selected topic
+const filteredMessages = computed(() => {
+  const messages = messagesStore.sortedMessages
+  const selectedTopicId = topicsStore.selectedTopicId
+  
+  if (!selectedTopicId) {
+    // Show all messages if no topic selected
+    return messages
+  }
+  
+  // Filter messages by topicId
+  return messages.filter(message => message.topicId === selectedTopicId)
+})
+
 const typingUsersText = computed(() => {
   const entries = typingUsers.value
   if (entries.length === 0) {
@@ -512,6 +583,16 @@ let isInitialLoad = true
 // Load messages when dialog changes
 // Load messages and pinned message when dialog changes
 watch(() => props.dialog?.dialogId, async (dialogId) => {
+  // Load topics for group chats
+  if (dialogId && isGroupChat.value) {
+    try {
+      await topicsStore.fetchUserTopics(dialogId)
+    } catch (error) {
+      console.error('Failed to load topics:', error)
+    }
+  } else {
+    topicsStore.reset()
+  }
   if (dialogId) {
     isInitialLoad = true
     isUserNearBottom = true
@@ -538,6 +619,18 @@ watch(
   (user) => {
     if (user?.userId && user.name) {
       userNamesCache.value[user.userId] = user.name
+    }
+  },
+  { immediate: true }
+)
+
+// Синхронизация выбранного топика для просмотра с топиком для отправки сообщений
+watch(
+  () => topicsStore.selectedTopicId,
+  (selectedTopicId) => {
+    // Когда пользователь выбирает топик для просмотра, автоматически выбираем его для отправки новых сообщений
+    if (isGroupChat.value) {
+      selectedTopicIdForMessage.value = selectedTopicId
     }
   },
   { immediate: true }
@@ -857,21 +950,36 @@ function getReadCount(message: Message): number {
     return 0
   }
   
-  // Ищем агрегированную запись с status="read" и userType="user"
-  const readEntry = statusMatrix.find(
-    (entry: any) => entry.status === 'read' && entry.userType === 'user'
-  )
+  // Проверяем, это агрегированный формат (с count и userType) или детальный (с userId)
+  const firstEntry = statusMatrix[0]
+  const isAggregated = firstEntry && typeof firstEntry.count === 'number' && firstEntry.userType
   
-  if (readEntry && typeof readEntry.count === 'number') {
-    return readEntry.count
+  if (isAggregated) {
+    // Агрегированный формат: ищем запись с status="read" и userType="user"
+    const readEntry = statusMatrix.find(
+      (entry: any) => entry.status === 'read' && entry.userType === 'user'
+    )
+    return readEntry?.count || 0
+  } else {
+    // Детальный формат: массив с userId, status, createdAt
+    // Считаем уникальных пользователей типа "user", которые прочитали сообщение
+    const readUserIds = new Set<string>()
+    
+    statusMatrix.forEach((entry: any) => {
+      // Проверяем, что это пользователь типа "user" (по префиксу userId или отсутствию других типов)
+      const userId = entry.userId || entry._id
+      if (!userId) return
+      
+      // Определяем тип пользователя по префиксу userId
+      const isUser = userId.startsWith('usr_') || (!userId.startsWith('bot_') && !userId.startsWith('cnt_'))
+      
+      if (isUser && entry.status === 'read') {
+        readUserIds.add(userId)
+      }
+    })
+    
+    return readUserIds.size
   }
-  
-  // Если формат не агрегированный, считаем количество записей со status="read" и userType="user"
-  const readStatuses = statusMatrix.filter(
-    (entry: any) => entry.status === 'read' && entry.userType === 'user'
-  )
-  
-  return readStatuses.length
 }
 
 function isMessageRead(message: Message): boolean {
@@ -1125,10 +1233,24 @@ async function handleSendMessage(content: string) {
       }
     }
 
+    // Add topicId if selected (only for group chats)
+    if (isGroupChat.value && selectedTopicIdForMessage.value) {
+      messageData.topicId = selectedTopicIdForMessage.value
+    }
+
     await messagesStore.sendMessage(props.dialog.dialogId, messageData)
     quotedMessage.value = null
   } catch (error) {
     console.error('Failed to send message:', error)
+  }
+}
+
+// Topic functions
+async function handleTopicCreated(topic: any) {
+  // Topic is already added to store by createTopic
+  // Optionally select it for new messages
+  if (isGroupChat.value) {
+    selectedTopicIdForMessage.value = topic.topicId
   }
 }
 
@@ -1159,6 +1281,11 @@ async function handleSendImage(payload: ImageMessagePayload) {
       if (messageId) {
         messagePayload.quotedMessageId = messageId
       }
+    }
+
+    // Add topicId if selected (only for group chats)
+    if (isGroupChat.value && selectedTopicIdForMessage.value) {
+      messagePayload.topicId = selectedTopicIdForMessage.value
     }
 
     await messagesStore.sendMessage(props.dialog.dialogId, messagePayload)

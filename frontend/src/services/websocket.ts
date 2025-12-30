@@ -47,7 +47,13 @@ class WebSocketService {
 
     // ✅ Chat3 Updates from RabbitMQ
     this.socket.on('chat3:update', (update: Chat3Update) => {
-      console.log('📬 Received Chat3 Update:', update.eventType, update.data)
+      console.log('📬 Received Chat3 Update:', {
+        eventType: update.eventType,
+        update,
+        data: update.data,
+        message: update.data?.message,
+        dialogId: update.dialogId || update.data?.context?.dialogId || update.data?.message?.dialogId
+      })
       this.emit('chat3:update', update)
     })
 

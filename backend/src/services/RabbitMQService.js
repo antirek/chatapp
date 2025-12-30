@@ -120,9 +120,9 @@ class RabbitMQService {
         }
       }
       
-      // Bind queue to exchange with routing key: user.{type}.{userId}.*
-      // New format: user.{type}.{userId}.{updateType}
-      const routingKey = `user.${userType}.${userId}.*`;
+      // Chat3 format: update.{category}.{userType}.{userId}.{updateType}
+      // Use wildcard for category: update.*.{userType}.{userId}.*
+      const routingKey = `update.*.${userType}.${userId}.*`;
       await this.channel.bindQueue(queue.queue, config.rabbitmq.updatesExchange, routingKey);
 
       console.log(`📬 User ${userId} subscribed to updates`);
